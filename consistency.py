@@ -26,32 +26,25 @@ def get_q_bragg_from_reflection(reflection, experiment):
     # a* = (A0, A1, A2)
     # b* = (A3, A4, A5)
     # c* = (A6, A7, A8)
-    A_matrix_elements = crystal_model.get_A() # This is a tuple of 9 elements
+    A = matrix.sqr(crystal_model.get_A()) # Convert tuple to matrix.sqr
 
-    # Construct a* vector (first row)
-    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[1], A_matrix_elements[2]))
-    
-    # Construct b* vector (second row)
-    b_star_vec = matrix.col((A_matrix_elements[3], A_matrix_elements[4], A_matrix_elements[5]))
-    
-    # Construct c* vector (third row)
-    c_star_vec = matrix.col((A_matrix_elements[6], A_matrix_elements[7], A_matrix_elements[8]))
+    # Extract rows properly
+    a_star_vec = A.row(0)  # First row: (A0, A1, A2)
+    b_star_vec = A.row(1)  # Second row: (A3, A4, A5)
+    c_star_vec = A.row(2)  # Third row: (A6, A7, A8)
 
     # q_bragg = h * a* + k * b* + l * c*
     q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec
     
-    return np.array(q_bragg_scitbx.elems) # Convert scitbx.matrix.col to NumPy array (3,)
+    return np.array(q_bragg_scitbx) # Convert scitbx.matrix.row to NumPy array (3,)
 
 # --- Helper function to calculate q_pixel for a specific pixel (like in pixq.py) ---
 def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_idx):
     """Calculates q-vector for a specific pixel directly using beam and detector models."""
-    # 1. k_in
-    wavelength = beam_model.get_wavelength()
-    s0_raw = np.array(beam_model.get_s0())
-    s0_norm = np.linalg.norm(s0_raw)
-    s0_vec = s0_raw / s0_norm if s0_norm > 1e-9 else s0_raw
-    k_magnitude = 1.0 / wavelength  # Using 1/λ instead of 2π/λ to match DIALS convention
-    k_in = s0_vec * k_magnitude
+    # 1. k_in - use s0 directly (already has length 1/λ)
+    s0 = np.array(beam_model.get_s0())
+    k_in = s0
+    k_magnitude = np.linalg.norm(s0)  # Should be 1/λ
 
     # 2. P_lab for this specific pixel
     # panel.get_pixel_lab_coord() takes (fast_pixel_index, slow_pixel_index)
@@ -63,7 +56,7 @@ def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_i
     D_scattered_norm = np.linalg.norm(D_scattered)
     if D_scattered_norm < 1e-9: return np.array([0.0, 0.0, 0.0]) # Should not happen for Bragg peak
     s1_lab = D_scattered / D_scattered_norm
-    k_out = s1_lab * k_magnitude  # Using 1/λ to match DIALS convention
+    k_out = s1_lab * k_magnitude
     
     # 4. q
     q_pixel = k_out - k_in
