@@ -4,7 +4,7 @@ import time
 from dxtbx.model.experiment_list import ExperimentListFactory
 
 # --- Configuration ---
-EXPERIMENT_FILE = "imported.expt" # Or indexed.expt
+EXPERIMENT_FILE = "indexed.expt" # Or indexed.expt
 OUTPUT_FORMAT = "npy" # "npy" or "hdf5"
 # ---------------------
 
