@@ -28,10 +28,11 @@ def get_q_bragg_from_reflection(reflection, experiment):
     # c* = (A6, A7, A8)
     A_matrix_elements = crystal_model.get_A()  # This is a tuple of 9 elements
     
-    # Extract rows properly from the tuple
-    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[1], A_matrix_elements[2]))  # First row: (A0, A1, A2)
-    b_star_vec = matrix.col((A_matrix_elements[3], A_matrix_elements[4], A_matrix_elements[5]))  # Second row: (A3, A4, A5)
-    c_star_vec = matrix.col((A_matrix_elements[6], A_matrix_elements[7], A_matrix_elements[8]))  # Third row: (A6, A7, A8)
+    # Convert to scitbx.matrix.sqr and extract rows properly
+    A = matrix.sqr(A_matrix_elements)  # 3×3, row-major
+    a_star_vec = A.row(0)  # First row: (A0, A1, A2)
+    b_star_vec = A.row(1)  # Second row: (A3, A4, A5)
+    c_star_vec = A.row(2)  # Third row: (A6, A7, A8)
 
     # q_bragg = h * a* + k * b* + l * c*
     q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec
