@@ -21,30 +21,45 @@ def load_dials_models(experiment_file_path):
 def calculate_incident_wavevector(beam_model):
     """Calculates the incident wavevector k_in."""
     wavelength = beam_model.get_wavelength()
-    s0_vec = np.array(beam_model.get_s0())  # Unit vector in lab frame
+    s0_raw = np.array(beam_model.get_s0())
+    print(f"  DEBUG: Raw beam.get_s0() from dxtbx: {s0_raw.tolist()}")
+    
+    s0_norm = np.linalg.norm(s0_raw)
+    if np.abs(s0_norm - 1.0) > 1e-6:  # If not close to unit vector
+        print(f"  WARNING: Raw s0 magnitude is {s0_norm:.6f}, normalizing.")
+        if s0_norm == 0:
+            raise ValueError("s0 vector from beam model has zero length!")
+        s0_vec = s0_raw / s0_norm
+    else:
+        s0_vec = s0_raw
+        
     k_magnitude = 2 * math.pi / wavelength
     k_in = s0_vec * k_magnitude
-    print(f"  DEBUG: beam.get_s0() from dxtbx: {s0_vec.tolist()}")
+    
+    print(f"  Normalized s0_vec: {s0_vec.tolist()}")
     print(f"  Wavelength: {wavelength:.4f} Å")
     print(f"  Calculated k_in vector: ({k_in[0]:.4f}, {k_in[1]:.4f}, {k_in[2]:.4f}) Å⁻¹")
     return k_in, k_magnitude
 
 def calculate_q_for_panel(panel_model, k_in_vec, k_mag_scalar, sample_origin_vec):
     """Calculates qx, qy, qz, and |q| maps for a single detector panel."""
-    panel_origin = np.array(panel_model.get_origin())
-    fast_axis = np.array(panel_model.get_fast_axis())
-    slow_axis = np.array(panel_model.get_slow_axis())
+    panel_origin_dxtbx = panel_model.get_origin()
+    fast_axis_dxtbx = panel_model.get_fast_axis()
+    slow_axis_dxtbx = panel_model.get_slow_axis()
     pixel_size_fast, pixel_size_slow = panel_model.get_pixel_size()
     num_fast, num_slow = panel_model.get_image_size()
 
     print(f"    Panel Dimensions: {num_fast} (fast) x {num_slow} (slow) pixels")
     
-    # --- For Debugging a specific pixel on Panel 0 ---
-    # if panel_model.get_name() == "0" or panel_model.get_name() == "": # Assuming panel_id might be string "0" or int 0
-    #     print(f"    DEBUG Panel 0: Origin (mm): {panel_model.get_origin()}")
-    #     print(f"    DEBUG Panel 0: Fast Axis: {panel_model.get_fast_axis()}")
-    #     print(f"    DEBUG Panel 0: Slow Axis: {panel_model.get_slow_axis()}")
-    # ----------------------------------------------------
+    # --- For Debugging Panel Geometry ---
+    print(f"    DEBUG Panel (Name: '{panel_model.get_name()}'): Origin (mm): {panel_origin_dxtbx}")
+    print(f"    DEBUG Panel (Name: '{panel_model.get_name()}'): Fast Axis: {fast_axis_dxtbx}")
+    print(f"    DEBUG Panel (Name: '{panel_model.get_name()}'): Slow Axis: {slow_axis_dxtbx}")
+    # -------------------------------------
+    
+    panel_origin = np.array(panel_origin_dxtbx)
+    fast_axis = np.array(fast_axis_dxtbx)
+    slow_axis = np.array(slow_axis_dxtbx)
 
     px_indices = np.arange(num_fast)
     py_indices = np.arange(num_slow)
