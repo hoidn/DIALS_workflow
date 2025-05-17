@@ -11,33 +11,26 @@ INDEXED_REFL_FILE = "indexed.refl"
 
 # --- Helper function to get q_bragg ---
 def get_q_bragg_from_reflection(reflection, experiment):
-    """Calculates q-vector from Miller index and crystal model."""
+    """Return q = h a* + k b* + l c* in the lab frame (Å⁻¹)."""
     h, k, l = reflection['miller_index']
     crystal_model = experiment.crystal
 
-    # Get the A matrix (setting matrix A = UB)
-    # A is a 3x3 scitbx.matrix.sqr object.
-    # Its elements are stored in row-major order:
-    # A = | A0 A1 A2 |
-    #     | A3 A4 A5 |
-    #     | A6 A7 A8 |
-    #
+    # A_matrix_elements is the 9-tuple from crystal.get_A(), row-major: (A0 … A8)
+    A_matrix_elements = crystal_model.get_A()
+
     # The rows of A are a*, b*, c*:
     # a* = (A0, A1, A2)
     # b* = (A3, A4, A5)
     # c* = (A6, A7, A8)
-    A_matrix_elements = crystal_model.get_A()  # This is a tuple of 9 elements
-    
-    # Convert to scitbx.matrix.sqr and extract rows properly
-    A = matrix.sqr(A_matrix_elements)  # 3×3, row-major
-    a_star_vec = A.row(0)  # First row: (A0, A1, A2)
-    b_star_vec = A.row(1)  # Second row: (A3, A4, A5)
-    c_star_vec = A.row(2)  # Third row: (A6, A7, A8)
+    # We slice the tuple to get the components for each reciprocal lattice vector.
+    a_star_vec = matrix.col(A_matrix_elements[0:3])  # (A0, A1, A2)
+    b_star_vec = matrix.col(A_matrix_elements[3:6])  # (A3, A4, A5)
+    c_star_vec = matrix.col(A_matrix_elements[6:9])  # (A6, A7, A8)
 
     # q_bragg = h * a* + k * b* + l * c*
     q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec
     
-    return np.array(q_bragg_scitbx) # Convert scitbx.matrix.row to NumPy array (3,)
+    return np.array(q_bragg_scitbx) # (3,) NumPy array
 
 # --- Helper function to calculate q_pixel for a specific pixel (like in pixq.py) ---
 def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_idx):
