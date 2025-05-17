@@ -26,10 +26,9 @@ def get_q_bragg_from_reflection(reflection, experiment):
     # a* = (A0, A1, A2)
     # b* = (A3, A4, A5)
     # c* = (A6, A7, A8)
-    A = matrix.sqr(crystal_model.get_A()) # Convert tuple to matrix.sqr
-
-    # Extract rows properly - matrix.sqr doesn't have a row() method
-    # Instead, we'll extract elements directly from the tuple
+    A_matrix_elements = crystal_model.get_A()  # This is a tuple of 9 elements
+    
+    # Extract rows properly from the tuple
     a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[1], A_matrix_elements[2]))  # First row: (A0, A1, A2)
     b_star_vec = matrix.col((A_matrix_elements[3], A_matrix_elements[4], A_matrix_elements[5]))  # Second row: (A3, A4, A5)
     c_star_vec = matrix.col((A_matrix_elements[6], A_matrix_elements[7], A_matrix_elements[8]))  # Third row: (A6, A7, A8)
