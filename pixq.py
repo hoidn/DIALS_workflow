@@ -32,13 +32,19 @@ def calculate_incident_wavevector(beam_model):
         s0_vec = s0_raw / s0_norm
     else:
         s0_vec = s0_raw
-        
-    k_magnitude = 2 * math.pi / wavelength
-    k_in = s0_vec * k_magnitude
     
-    print(f"  Normalized s0_vec: {s0_vec.tolist()}")
+    print(f"  Normalized s0_vec (from model): {s0_vec.tolist()}")
+    
+    # <<<< TEST: FORCE K_IN TO BE ALONG +Z AXIS >>>>
+    s0_test_positive_z = np.array([0.0, 0.0, 1.0])
+    print(f"  WARNING: TESTING WITH FORCED s0_vec = {s0_test_positive_z.tolist()}")
+    
+    k_magnitude = 2 * math.pi / wavelength
+    k_in = s0_test_positive_z * k_magnitude
+    # <<<< END TEST >>>>
+    
     print(f"  Wavelength: {wavelength:.4f} Å")
-    print(f"  Calculated k_in vector: ({k_in[0]:.4f}, {k_in[1]:.4f}, {k_in[2]:.4f}) Å⁻¹")
+    print(f"  Calculated k_in vector (FORCED +Z): ({k_in[0]:.4f}, {k_in[1]:.4f}, {k_in[2]:.4f}) Å⁻¹")
     return k_in, k_magnitude
 
 def calculate_q_for_panel(panel_model, k_in_vec, k_mag_scalar, sample_origin_vec):
