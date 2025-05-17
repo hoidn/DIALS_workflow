@@ -31,21 +31,30 @@ def get_q_bragg_from_reflection(reflection, experiment):
     """Calculates q-vector from Miller index and crystal model."""
     h, k, l = reflection['miller_index']
     crystal_model = experiment.crystal
-    
-    # A matrix maps (h,k,l) to reciprocal space vector in Angstrom^-1
-    # q = A * (h,k,l)
-    # A = U * B * S (S is scan-varying part, often identity for stills)
-    # For stills, often A = UB is sufficient.
-    # The A matrix is directly stored or can be derived.
-    # dxtbx crystal model provides real_space_a, real_space_b, real_space_c
-    # and reciprocal_space_a_star, b_star, c_star vectors.
-    
-    a_star_vec = matrix.col(crystal_model.get_A_as_vec_star()[:3]) # a* vector components
-    b_star_vec = matrix.col(crystal_model.get_A_as_vec_star()[3:6])# b* vector components
-    c_star_vec = matrix.col(crystal_model.get_A_as_vec_star()[6:9])# c* vector components
 
+    # Get the A matrix (setting matrix A = UB)
+    # The A matrix transforms fractional Miller indices (h,k,l) to
+    # reciprocal space coordinates (x*, y*, z*) in Å⁻¹.
+    # A = [a*x b*x c*x]
+    #     [a*y b*y c*y]
+    #     [a*z b*z c*z]  <-- This is if A is [a* b* c*] (columns are basis vectors)
+    #
+    # For dxtbx, r_star = A * h where h is a column vector (h,k,l)^T
+    # So, the columns of A are indeed a*, b*, c*
+    
+    A_matrix = matrix.sqr(crystal_model.get_A()) # A is 3x3 matrix
+
+    # a_star_vec is the first column of A
+    a_star_vec = A_matrix.col(0)
+    # b_star_vec is the second column of A
+    b_star_vec = A_matrix.col(1)
+    # c_star_vec is the third column of A
+    c_star_vec = A_matrix.col(2)
+
+    # q_bragg = h * a* + k * b* + l * c*
     q_bragg = h * a_star_vec + k * b_star_vec + l * c_star_vec
-    return np.array(q_bragg) # Convert to NumPy array (3,)
+    
+    return np.array(q_bragg) # Convert scitbx.matrix.col to NumPy array (3,)
 
 # --- Load per-pixel q-maps (assuming only one panel for simplicity in this example) ---
 # In a real scenario, you'd loop through panels or have a way to map panel_id from reflection
