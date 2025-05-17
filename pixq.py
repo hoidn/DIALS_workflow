@@ -160,8 +160,8 @@ def main():
     if total_pixels_processed > 0 :
         print(f"Time per megapixel: {total_time / (total_pixels_processed / 1e6):.2f} seconds/Mpixel.")
 
-def verify_single_pixel_q(beam_model, panel_model, test_px_fast, test_py_slow):
-    print(f"\n--- Verifying q for Panel '{panel_model.get_name()}', Pixel (fast={test_px_fast}, slow={test_py_slow}) ---")
+def verify_single_pixel_q(beam_model, panel_model, panel_idx_int, test_px_fast, test_py_slow):
+    print(f"\n--- Verifying q for Panel Index {panel_idx_int} (Name: '{panel_model.get_name()}'), Pixel (fast={test_px_fast}, slow={test_py_slow}) ---")
 
     # 1. Get k_in
     k_in_vec_test, k_mag_scalar_test = calculate_incident_wavevector(beam_model) # Recalculate for clarity
@@ -191,12 +191,10 @@ def verify_single_pixel_q(beam_model, panel_model, test_px_fast, test_py_slow):
     
     # 5. Compare with the value from your saved q-map (if available)
     try:
-        panel_id_str_test = str(panel_model.get_name()) # Or however you get the ID string
-        if panel_id_str_test == "": panel_id_str_test = "0" # common default
-
-        loaded_qx = np.load(f"panel_{panel_id_str_test}_qmap_qx.npy")
-        loaded_qy = np.load(f"panel_{panel_id_str_test}_qmap_qy.npy")
-        loaded_qz = np.load(f"panel_{panel_id_str_test}_qmap_qz.npy")
+        # Use the integer panel index for loading, consistent with saving
+        loaded_qx = np.load(f"panel_{panel_idx_int}_qmap_qx.npy")
+        loaded_qy = np.load(f"panel_{panel_idx_int}_qmap_qy.npy")
+        loaded_qz = np.load(f"panel_{panel_idx_int}_qmap_qz.npy")
         q_from_map = np.array([
             loaded_qx[test_py_slow, test_px_fast],
             loaded_qy[test_py_slow, test_px_fast],
@@ -204,8 +202,10 @@ def verify_single_pixel_q(beam_model, panel_model, test_px_fast, test_py_slow):
         ])
         print(f"  q_pixel (from saved map): {q_from_map.tolist()} Å⁻¹")
         print(f"  Difference (dxtbx_method - map): {(q_pixel_dxtbx_method - q_from_map).tolist()}")
+        diff_norm = np.linalg.norm(q_pixel_dxtbx_method - q_from_map)
+        print(f"  |Difference| (dxtbx_method - map): {diff_norm:.6e}")
     except FileNotFoundError:
-        print("  Could not load saved q-maps for comparison with this test pixel.")
+        print(f"  Could not load saved q-maps for panel index {panel_idx_int} for comparison with this test pixel.")
     
     return q_pixel_dxtbx_method
 
@@ -219,20 +219,11 @@ if __name__ == "__main__":
     # For simplicity, re-load here based on the global EXPERIMENT_FILE
     test_beam_model, test_detector_model = load_dials_models(EXPERIMENT_FILE)
     
-    # Test for Refl 0: Panel 0, Pixel (fast=2342, slow=30)
-    # Make sure panel_id matches how you access test_detector_model
-    # If detector_model is a list of panels:
-    panel_to_test = None
-    for p_idx, p_model in enumerate(test_detector_model):
-        # Assuming the first panel is the one we want, or match by name/id
-        # Panel name might be "0" or "" for the first panel.
-        # Using p_idx as a simple way to get the first panel.
-        if p_idx == 0: 
-            panel_to_test = p_model
-            break
-    
-    if panel_to_test:
-        q_verified = verify_single_pixel_q(test_beam_model, panel_to_test, 2342, 30)
+    panel_to_test_idx = 0 # Test the first panel (index 0)
+    if panel_to_test_idx < len(test_detector_model):
+        panel_model_for_test = test_detector_model[panel_to_test_idx]
+        # Test for Refl 0: Pixel (fast=2342, slow=30)
+        q_verified = verify_single_pixel_q(test_beam_model, panel_model_for_test, panel_to_test_idx, 2342, 30)
         if q_verified is not None:
             # Compare this q_verified with q_bragg for Refl 0
             q_bragg_refl0 = np.array([0.4729, -0.6136, 0.4021]) # From consistency.py output
@@ -242,4 +233,4 @@ if __name__ == "__main__":
             print(f"  Diff (bragg - dxtbx verify): {(q_bragg_refl0 - q_verified).tolist()}")
             print(f"  |Diff|                    : {np.linalg.norm(q_bragg_refl0 - q_verified):.6f}")
     else:
-        print("Could not find panel 0 to test.")
+        print(f"Could not find panel with index {panel_to_test_idx} to test.")
