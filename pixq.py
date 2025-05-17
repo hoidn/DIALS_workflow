@@ -19,7 +19,10 @@ def load_dials_models(experiment_file_path):
     return experiment.beam, experiment.detector
 
 def calculate_incident_wavevector(beam_model):
-    """Calculates the incident wavevector k_in."""
+    """
+    Return s0 and its magnitude **without** the 2π factor,
+    matching DIALS' internal convention.
+    """
     wavelength = beam_model.get_wavelength()
     s0_raw = np.array(beam_model.get_s0())
     print(f"  DEBUG: Raw beam.get_s0() from dxtbx: {s0_raw.tolist()}")
@@ -35,7 +38,7 @@ def calculate_incident_wavevector(beam_model):
     
     print(f"  Normalized s0_vec (from model): {s0_vec.tolist()}")
     
-    k_magnitude = 2 * math.pi / wavelength
+    k_magnitude = 1.0 / wavelength  # Using 1/λ instead of 2π/λ to match DIALS convention
     k_in = s0_vec * k_magnitude
     
     print(f"  Wavelength: {wavelength:.4f} Å")
@@ -182,7 +185,7 @@ def verify_single_pixel_q(beam_model, panel_model, panel_idx_int, test_px_fast, 
         return None
 
     s1_lab_dxtbx = D_scattered_dxtbx / D_scattered_dxtbx_norm
-    k_out_dxtbx = s1_lab_dxtbx * k_mag_scalar_test
+    k_out_dxtbx = s1_lab_dxtbx * k_mag_scalar_test  # Using 1/λ to match DIALS convention
     print(f"  k_out (from dxtbx P_lab): {k_out_dxtbx.tolist()} Å⁻¹")
 
     # 4. Calculate q

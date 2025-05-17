@@ -50,7 +50,7 @@ def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_i
     s0_raw = np.array(beam_model.get_s0())
     s0_norm = np.linalg.norm(s0_raw)
     s0_vec = s0_raw / s0_norm if s0_norm > 1e-9 else s0_raw
-    k_magnitude = 2 * math.pi / wavelength
+    k_magnitude = 1.0 / wavelength  # Using 1/λ instead of 2π/λ to match DIALS convention
     k_in = s0_vec * k_magnitude
 
     # 2. P_lab for this specific pixel
@@ -63,7 +63,7 @@ def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_i
     D_scattered_norm = np.linalg.norm(D_scattered)
     if D_scattered_norm < 1e-9: return np.array([0.0, 0.0, 0.0]) # Should not happen for Bragg peak
     s1_lab = D_scattered / D_scattered_norm
-    k_out = s1_lab * k_magnitude
+    k_out = s1_lab * k_magnitude  # Using 1/λ to match DIALS convention
     
     # 4. q
     q_pixel = k_out - k_in
