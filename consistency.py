@@ -22,20 +22,20 @@ def get_q_bragg_from_reflection(reflection, experiment):
     #     | A3 A4 A5 |
     #     | A6 A7 A8 |
     #
-    # The columns of A are a*, b*, c*:
-    # a* = (A0, A3, A6)
-    # b* = (A1, A4, A7)
-    # c* = (A2, A5, A8)
+    # The rows of A are a*, b*, c*:
+    # a* = (A0, A1, A2)
+    # b* = (A3, A4, A5)
+    # c* = (A6, A7, A8)
     A_matrix_elements = crystal_model.get_A() # This is a tuple of 9 elements
 
-    # Construct a* vector
-    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[3], A_matrix_elements[6]))
+    # Construct a* vector (first row)
+    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[1], A_matrix_elements[2]))
     
-    # Construct b* vector
-    b_star_vec = matrix.col((A_matrix_elements[1], A_matrix_elements[4], A_matrix_elements[7]))
+    # Construct b* vector (second row)
+    b_star_vec = matrix.col((A_matrix_elements[3], A_matrix_elements[4], A_matrix_elements[5]))
     
-    # Construct c* vector
-    c_star_vec = matrix.col((A_matrix_elements[2], A_matrix_elements[5], A_matrix_elements[8]))
+    # Construct c* vector (third row)
+    c_star_vec = matrix.col((A_matrix_elements[6], A_matrix_elements[7], A_matrix_elements[8]))
 
     # q_bragg = h * a* + k * b* + l * c*
     q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec

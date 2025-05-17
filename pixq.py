@@ -24,25 +24,18 @@ def calculate_incident_wavevector(beam_model):
     matching DIALS' internal convention.
     """
     wavelength = beam_model.get_wavelength()
-    s0_raw = np.array(beam_model.get_s0())
-    print(f"  DEBUG: Raw beam.get_s0() from dxtbx: {s0_raw.tolist()}")
+    s0 = np.array(beam_model.get_s0())  # Already has length 1/λ
+    print(f"  DEBUG: Raw beam.get_s0() from dxtbx: {s0.tolist()}")
     
-    s0_norm = np.linalg.norm(s0_raw)
-    if np.abs(s0_norm - 1.0) > 1e-6:  # If not close to unit vector
-        print(f"  WARNING: Raw s0 magnitude is {s0_norm:.6f}, normalizing.")
-        if s0_norm == 0:
-            raise ValueError("s0 vector from beam model has zero length!")
-        s0_vec = s0_raw / s0_norm
-    else:
-        s0_vec = s0_raw
-    
-    print(f"  Normalized s0_vec (from model): {s0_vec.tolist()}")
-    
-    k_magnitude = 1.0 / wavelength  # Using 1/λ instead of 2π/λ to match DIALS convention
-    k_in = s0_vec * k_magnitude
-    
+    k_magnitude = 1.0 / wavelength  # Should match |s0|
     print(f"  Wavelength: {wavelength:.4f} Å")
-    print(f"  Calculated k_in vector: ({k_in[0]:.4f}, {k_in[1]:.4f}, {k_in[2]:.4f}) Å⁻¹")
+    print(f"  |s0| from model: {np.linalg.norm(s0):.6f}")
+    print(f"  Expected k_magnitude (1/λ): {k_magnitude:.6f}")
+    
+    # Use s0 directly as k_in - it's already in the right units
+    k_in = s0
+    
+    print(f"  Using k_in vector: ({k_in[0]:.4f}, {k_in[1]:.4f}, {k_in[2]:.4f}) Å⁻¹")
     return k_in, k_magnitude
 
 def calculate_q_for_panel(panel_model, k_in_vec, k_mag_scalar, sample_origin_vec):
@@ -230,7 +223,7 @@ if __name__ == "__main__":
         q_verified = verify_single_pixel_q(test_beam_model, panel_model_for_test, panel_to_test_idx, 2342, 30)
         if q_verified is not None:
             # Compare this q_verified with q_bragg for Refl 0
-            q_bragg_refl0 = np.array([0.4729, -0.6136, 0.4021]) # From consistency.py output
+            q_bragg_refl0 = np.array([0.4729, 0.6267, 0.3810]) # Updated to match correct q_bragg
             print(f"\nFor Refl 0 (hkl: (-23, 17, 7)):")
             print(f"  q_bragg (manual)          : {q_bragg_refl0.tolist()}, |q|={np.linalg.norm(q_bragg_refl0):.4f}")
             print(f"  q_pixel (dxtbx verify)    : {q_verified.tolist()}, |q|={np.linalg.norm(q_verified):.4f}")
