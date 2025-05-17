@@ -160,5 +160,86 @@ def main():
     if total_pixels_processed > 0 :
         print(f"Time per megapixel: {total_time / (total_pixels_processed / 1e6):.2f} seconds/Mpixel.")
 
+def verify_single_pixel_q(beam_model, panel_model, test_px_fast, test_py_slow):
+    print(f"\n--- Verifying q for Panel '{panel_model.get_name()}', Pixel (fast={test_px_fast}, slow={test_py_slow}) ---")
+
+    # 1. Get k_in
+    k_in_vec_test, k_mag_scalar_test = calculate_incident_wavevector(beam_model) # Recalculate for clarity
+
+    # 2. Get P_lab for this specific pixel using dxtbx direct method
+    # panel.get_pixel_lab_coord() takes (fast_pixel_index, slow_pixel_index)
+    P_lab_dxtbx = np.array(panel_model.get_pixel_lab_coord((test_px_fast, test_py_slow)))
+    print(f"  P_lab (from dxtbx.get_pixel_lab_coord): {P_lab_dxtbx.tolist()} mm")
+
+    # 3. Calculate k_out
+    sample_origin_vec_test = np.array([0.0, 0.0, 0.0])
+    D_scattered_dxtbx = P_lab_dxtbx - sample_origin_vec_test
+    D_scattered_dxtbx_norm = np.linalg.norm(D_scattered_dxtbx)
+    
+    if D_scattered_dxtbx_norm < 1e-9:
+        print("  Error: D_scattered_dxtbx_norm is zero.")
+        return None
+
+    s1_lab_dxtbx = D_scattered_dxtbx / D_scattered_dxtbx_norm
+    k_out_dxtbx = s1_lab_dxtbx * k_mag_scalar_test
+    print(f"  k_out (from dxtbx P_lab): {k_out_dxtbx.tolist()} Å⁻¹")
+
+    # 4. Calculate q
+    q_pixel_dxtbx_method = k_out_dxtbx - k_in_vec_test
+    print(f"  q_pixel (dxtbx method): {q_pixel_dxtbx_method.tolist()} Å⁻¹")
+    print(f"  |q_pixel| (dxtbx method): {np.linalg.norm(q_pixel_dxtbx_method):.4f} Å⁻¹")
+    
+    # 5. Compare with the value from your saved q-map (if available)
+    try:
+        panel_id_str_test = str(panel_model.get_name()) # Or however you get the ID string
+        if panel_id_str_test == "": panel_id_str_test = "0" # common default
+
+        loaded_qx = np.load(f"panel_{panel_id_str_test}_qmap_qx.npy")
+        loaded_qy = np.load(f"panel_{panel_id_str_test}_qmap_qy.npy")
+        loaded_qz = np.load(f"panel_{panel_id_str_test}_qmap_qz.npy")
+        q_from_map = np.array([
+            loaded_qx[test_py_slow, test_px_fast],
+            loaded_qy[test_py_slow, test_px_fast],
+            loaded_qz[test_py_slow, test_px_fast]
+        ])
+        print(f"  q_pixel (from saved map): {q_from_map.tolist()} Å⁻¹")
+        print(f"  Difference (dxtbx_method - map): {(q_pixel_dxtbx_method - q_from_map).tolist()}")
+    except FileNotFoundError:
+        print("  Could not load saved q-maps for comparison with this test pixel.")
+    
+    return q_pixel_dxtbx_method
+
 if __name__ == "__main__":
-    main()
+    main() # Your existing main function call
+
+    # --- Add the test ---
+    print("\n--- Running Single Pixel Verification ---")
+    # Ensure beam_model and detector_model are from the correct experiment file used in main()
+    # If main() modified them, re-load or pass them carefully.
+    # For simplicity, re-load here based on the global EXPERIMENT_FILE
+    test_beam_model, test_detector_model = load_dials_models(EXPERIMENT_FILE)
+    
+    # Test for Refl 0: Panel 0, Pixel (fast=2342, slow=30)
+    # Make sure panel_id matches how you access test_detector_model
+    # If detector_model is a list of panels:
+    panel_to_test = None
+    for p_idx, p_model in enumerate(test_detector_model):
+        # Assuming the first panel is the one we want, or match by name/id
+        # Panel name might be "0" or "" for the first panel.
+        # Using p_idx as a simple way to get the first panel.
+        if p_idx == 0: 
+            panel_to_test = p_model
+            break
+    
+    if panel_to_test:
+        q_verified = verify_single_pixel_q(test_beam_model, panel_to_test, 2342, 30)
+        if q_verified is not None:
+            # Compare this q_verified with q_bragg for Refl 0
+            q_bragg_refl0 = np.array([0.4729, -0.6136, 0.4021]) # From consistency.py output
+            print(f"\nFor Refl 0 (hkl: (-23, 17, 7)):")
+            print(f"  q_bragg (manual)          : {q_bragg_refl0.tolist()}, |q|={np.linalg.norm(q_bragg_refl0):.4f}")
+            print(f"  q_pixel (dxtbx verify)    : {q_verified.tolist()}, |q|={np.linalg.norm(q_verified):.4f}")
+            print(f"  Diff (bragg - dxtbx verify): {(q_bragg_refl0 - q_verified).tolist()}")
+            print(f"  |Diff|                    : {np.linalg.norm(q_bragg_refl0 - q_verified):.6f}")
+    else:
+        print("Could not find panel 0 to test.")
