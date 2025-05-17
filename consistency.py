@@ -33,28 +33,31 @@ def get_q_bragg_from_reflection(reflection, experiment):
     crystal_model = experiment.crystal
 
     # Get the A matrix (setting matrix A = UB)
-    # The A matrix transforms fractional Miller indices (h,k,l) to
-    # reciprocal space coordinates (x*, y*, z*) in Å⁻¹.
-    # A = [a*x b*x c*x]
-    #     [a*y b*y c*y]
-    #     [a*z b*z c*z]  <-- This is if A is [a* b* c*] (columns are basis vectors)
+    # A is a 3x3 scitbx.matrix.sqr object.
+    # Its elements are stored in row-major order:
+    # A = | A0 A1 A2 |
+    #     | A3 A4 A5 |
+    #     | A6 A7 A8 |
     #
-    # For dxtbx, r_star = A * h where h is a column vector (h,k,l)^T
-    # So, the columns of A are indeed a*, b*, c*
-    
-    A_matrix = matrix.sqr(crystal_model.get_A()) # A is 3x3 matrix
+    # The columns of A are a*, b*, c*:
+    # a* = (A0, A3, A6)
+    # b* = (A1, A4, A7)
+    # c* = (A2, A5, A8)
+    A_matrix_elements = crystal_model.get_A() # This is a tuple of 9 elements
 
-    # a_star_vec is the first column of A
-    a_star_vec = A_matrix.col(0)
-    # b_star_vec is the second column of A
-    b_star_vec = A_matrix.col(1)
-    # c_star_vec is the third column of A
-    c_star_vec = A_matrix.col(2)
+    # Construct a* vector
+    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[3], A_matrix_elements[6]))
+    
+    # Construct b* vector
+    b_star_vec = matrix.col((A_matrix_elements[1], A_matrix_elements[4], A_matrix_elements[7]))
+    
+    # Construct c* vector
+    c_star_vec = matrix.col((A_matrix_elements[2], A_matrix_elements[5], A_matrix_elements[8]))
 
     # q_bragg = h * a* + k * b* + l * c*
-    q_bragg = h * a_star_vec + k * b_star_vec + l * c_star_vec
+    q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec
     
-    return np.array(q_bragg) # Convert scitbx.matrix.col to NumPy array (3,)
+    return np.array(q_bragg_scitbx.elems) # Convert scitbx.matrix.col to NumPy array (3,)
 
 # --- Load per-pixel q-maps (assuming only one panel for simplicity in this example) ---
 # In a real scenario, you'd loop through panels or have a way to map panel_id from reflection
