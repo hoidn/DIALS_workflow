@@ -203,7 +203,7 @@ if q_diff_magnitudes:
             plt.figure(figsize=(10, 10))
             # Normalize error for color mapping, cap at a reasonable max_error for visualization
             # vmax_error = np.percentile(all_q_diff_magnitudes_np, 95) # Cap at 95th percentile
-            vmax_error = 0.1 # Adjusted fixed cap based on recent typical max values, can be tuned
+            vmax_error = 1.1 # Adjusted fixed cap based on recent typical max values, can be tuned
             if np.any(all_q_diff_magnitudes_np > vmax_error): # Check if any errors exceed the cap
                  print(f"Note: Some |Δq| values exceed heatmap vmax of {vmax_error} Å⁻¹ and will be shown as the max color.")
 
