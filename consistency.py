@@ -80,6 +80,8 @@ print("\nComparing q_bragg with directly recalculated q_pixel for indexed reflec
 q_diff_magnitudes = []
 q_bragg_mags_list = []
 q_pixel_mags_list = []
+all_px_coords = []
+all_py_coords = []
 
 for i in range(len(reflections_indexed)):
     refl = reflections_indexed[i]
@@ -122,6 +124,8 @@ for i in range(len(reflections_indexed)):
     q_difference = q_bragg - q_pixel_recalculated
     diff_magnitude = np.linalg.norm(q_difference)
     q_diff_magnitudes.append(diff_magnitude)
+    all_px_coords.append(px_idx)
+    all_py_coords.append(py_idx)
 
     q_bragg_mag = np.linalg.norm(q_bragg)
     q_pixel_mag = np.linalg.norm(q_pixel_recalculated)
@@ -176,6 +180,57 @@ if q_diff_magnitudes:
         plt.savefig("q_consistency_check_direct_recalc.png")
         print("\nSaved q_consistency_check_direct_recalc.png")
         # plt.show() # Uncomment to display plot interactively
+
+        # Create the heatmap
+        if all_px_coords and all_py_coords: # Ensure lists are not empty
+            all_px_coords_np = np.array(all_px_coords)
+            all_py_coords_np = np.array(all_py_coords)
+            all_q_diff_magnitudes_np = np.array(q_diff_magnitudes) # Already created
+
+            try:
+                panel0 = experiments[0].detector[0] # Assuming first experiment, first panel
+                num_fast_plot, num_slow_plot = panel0.get_image_size()
+            except IndexError: # Handle case where experiments or detector might be empty or not structured as expected
+                print("Warning: Could not get panel dimensions for heatmap plot limits. Using max coordinates.")
+                num_fast_plot = np.max(all_px_coords_np) + 1 if len(all_px_coords_np) > 0 else 2463 # Default fallback
+                num_slow_plot = np.max(all_py_coords_np) + 1 if len(all_py_coords_np) > 0 else 2527 # Default fallback
+            except Exception as e:
+                print(f"Warning: Error getting panel dimensions for heatmap: {e}. Using max coordinates.")
+                num_fast_plot = np.max(all_px_coords_np) + 1 if len(all_px_coords_np) > 0 else 2463
+                num_slow_plot = np.max(all_py_coords_np) + 1 if len(all_py_coords_np) > 0 else 2527
+
+
+            plt.figure(figsize=(10, 10))
+            # Normalize error for color mapping, cap at a reasonable max_error for visualization
+            # vmax_error = np.percentile(all_q_diff_magnitudes_np, 95) # Cap at 95th percentile
+            vmax_error = 0.1 # Adjusted fixed cap based on recent typical max values, can be tuned
+            if np.any(all_q_diff_magnitudes_np > vmax_error): # Check if any errors exceed the cap
+                 print(f"Note: Some |Δq| values exceed heatmap vmax of {vmax_error} Å⁻¹ and will be shown as the max color.")
+
+
+            scatter = plt.scatter(
+                all_px_coords_np, 
+                all_py_coords_np, 
+                c=all_q_diff_magnitudes_np, 
+                cmap='viridis', # Or 'hot', 'coolwarm', etc.
+                s=10, # Adjust marker size
+                vmin=0, 
+                vmax=vmax_error # Cap the color scale for better visibility of smaller errors
+            )
+            
+            plt.colorbar(scatter, label='|Δq| = |q_bragg_corr - q_pixel_recalc| (Å⁻¹)')
+            plt.title('Spatial Distribution of q-vector Differences on Detector')
+            plt.xlabel('Fast Pixel Coordinate (px_idx)')
+            plt.ylabel('Slow Pixel Coordinate (py_idx)')
+            plt.xlim(0, num_fast_plot)
+            plt.ylim(num_slow_plot, 0) # Invert Y-axis to match typical image display (origin top-left)
+            plt.gca().set_aspect('equal', adjustable='box')
+            plt.grid(True)
+            plt.tight_layout()
+            plt.savefig("q_difference_heatmap.png")
+            print("\nSaved q_difference_heatmap.png")
+            # plt.show()
+
     except ImportError:
         print("\nMatplotlib not found. Skipping plot generation.")
 else:
