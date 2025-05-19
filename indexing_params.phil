@@ -1,16 +1,13 @@
 indexing {
-  refinement_protocol { 
+  refinement_protocol {
     detector {
-      fix = None 
+      fix = None
       parameterisation {
+        type = single
         single_panel {
-          level = 1 
+          level = 1
         }
       }
     }
   }
-  
-  
-  
-  
 }
