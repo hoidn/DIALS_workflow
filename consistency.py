@@ -23,7 +23,7 @@ def get_q_bragg_from_reflection(refl, experiment):
     
     # Apply Y-flip correction to Q_BRAGG to match the detector/beam lab frame's Y axis
     # This is based on empirical observation for this specific dataset/setup.
-    q_bragg_np[1] *= -1
+    # q_bragg_np[1] *= -1 # <--- COMMENT THIS OUT
     
     return q_bragg_np
 

@@ -122,10 +122,11 @@ for cbf_file in "$@"; do
     fi
 
     # 3. dials.index
-    echo "Step 3: Running dials.index..."
+    echo "Step 3: Running dials.index (with detector refinement enabled)..."
     dials.index imported.expt strong.refl \
       indexing.known_symmetry.unit_cell="$UNIT_CELL" \
       indexing.known_symmetry.space_group="$SPACE_GROUP" \
+      "../indexing_params.phil" \
       output.experiments=indexed.expt \
       output.reflections=indexed.refl > dials.index.log 2>&1
     if [ $? -ne 0 ] || [ ! -f indexed.expt ] || [ ! -f indexed.refl ]; then
