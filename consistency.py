@@ -82,6 +82,9 @@ q_bragg_mags_list = []
 q_pixel_mags_list = []
 all_px_coords = []
 all_py_coords = []
+# For comparing q_pixel_recalculated with DIALS' q_pred (s1-s0)
+q_pixel_vs_dials_pred_diff_norms = flex.double()
+
 
 for i in range(len(reflections_indexed)):
     refl = reflections_indexed[i]
@@ -120,7 +123,7 @@ for i in range(len(reflections_indexed)):
     
     q_pixel_recalculated = calculate_q_for_single_pixel(beam_model_current, panel_model_current, px_idx, py_idx)
 
-    # d. Compare
+    # d. Compare q_bragg (from A matrix) with q_pixel_recalculated
     q_difference = q_bragg - q_pixel_recalculated
     diff_magnitude = np.linalg.norm(q_difference)
     q_diff_magnitudes.append(diff_magnitude)
@@ -131,6 +134,14 @@ for i in range(len(reflections_indexed)):
     q_pixel_mag = np.linalg.norm(q_pixel_recalculated)
     q_bragg_mags_list.append(q_bragg_mag)
     q_pixel_mags_list.append(q_pixel_mag)
+
+    # e. Compare q_pixel_recalculated with DIALS' q_pred (s1-s0)
+    s0_vec = np.array(current_experiment.beam.get_s0())
+    s1_vec = np.array(refl['s1'])
+    q_pred_dials = s1_vec - s0_vec
+    
+    diff_q_pixel_vs_dials_pred = q_pred_dials - q_pixel_recalculated
+    q_pixel_vs_dials_pred_diff_norms.append(np.linalg.norm(diff_q_pixel_vs_dials_pred))
 
     if i < 10 or diff_magnitude > 0.01 : # Print first few and any large differences
         print(f"Refl {i} (hkl: {refl['miller_index']}):")
@@ -151,6 +162,9 @@ if q_diff_magnitudes:
     print(f"  StdDev: {np.std(q_diff_magnitudes):.6f}")
     print(f"  Min:    {np.min(q_diff_magnitudes):.6f}")
     print(f"  Max:    {np.max(q_diff_magnitudes):.6f}")
+
+    if len(q_pixel_vs_dials_pred_diff_norms) > 0:
+        print(f"\nMean |q_pred_dials - q_pixel_recalculated|: {flex.mean(q_pixel_vs_dials_pred_diff_norms):.6f} Å⁻¹")
 
     # Optional: Plot a histogram of differences or a scatter plot
     try:
