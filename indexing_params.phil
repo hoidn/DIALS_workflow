@@ -1,16 +1,16 @@
 indexing {
-  refinement_protocol { // Use refinement_protocol for stills refinement control
+  refinement_protocol { 
     detector {
-      fix = None // Crucial: allow detector parameters to be refined
+      fix = None 
       parameterisation {
         single_panel {
-          level = 1 // Refines origin (distance) + 2 tilts
+          level = 1 
         }
       }
     }
   }
-  // Add other indexing parameters if needed, e.g.
-  // known_symmetry.unit_cell = "..." (already on cmd line)
-  // known_symmetry.space_group = "..." (already on cmd line)
-  // method = fft3d // or your preferred method
+  
+  
+  
+  
 }
