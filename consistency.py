@@ -95,7 +95,8 @@ for i in range(len(reflections_indexed)):
     # For q-map lookup, we need integer pixel indices (fast_px_idx, slow_px_idx)
     # DIALS pixel coordinates are (fast_scan_coord, slow_scan_coord)
     # NumPy array indexing is typically (row_idx=slow_scan, col_idx=fast_scan)
-    x_obs_px, y_obs_px, _ = refl['xyzobs.px.value']
+    x_obs_px, y_obs_px, _ = refl['xyzcal.px.value']
+    #x_obs_px, y_obs_px, _ = refl['xyzobs.px.value']
     
     # Convert observed pixel coordinates (float) to integer indices
     # DIALS coordinates: fast (x), slow (y)
