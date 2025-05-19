@@ -147,26 +147,18 @@ for cbf_file in "$@"; do
     echo "dials.index (initial) successful. Indexed $INDEXED_COUNT reflections ($PERCENT_INDEXED %)."
     echo "Indexed $INDEXED_COUNT ($PERCENT_INDEXED %) for $cbf_file (initial)." >> "$LOG_SUMMARY"
 
-    # 4. dials.refine (dedicated refinement of detector and beam)
-    echo "Step 4: Running dials.refine (for detector and beam geometry)..."
+    # 4. dials.refine (dedicated refinement of detector and beam geometry using PHIL)
+    echo "Step 4: Running dials.refine (for detector and beam geometry using PHIL)..."
     dials.refine indexed_initial.expt indexed_initial.refl \
+      "../refine_detector.phil" \ # Correct path to your PHIL file
       output.experiments=indexed_refined_detector.expt \
       output.reflections=indexed_refined_detector.refl \
-      detector.panel_0.origin=shift \
-      detector.panel_0.tilt=xy \
-      beam.fix=None \
-      crystal.fix=cell \
-      reflections.outlier.algorithm=null \
       > dials.refine.log 2>&1
-      # Note: 'crystal.fix=cell' is added to prevent the unit cell from changing too much
-      # while we focus on getting the experimental geometry right.
-      # Remove or change to 'crystal.fix=None' if you want the cell to refine freely too.
-      # 'reflections.outlier.algorithm=null' is because stills_indexer handles outliers before this.
 
     if [ $? -ne 0 ] || [ ! -f indexed_refined_detector.expt ] || [ ! -f indexed_refined_detector.refl ]; then
         echo "Error: dials.refine failed for $cbf_file. Check dials.refine.log in $work_dir"
         echo "dials.refine failed for $cbf_file" >> "$LOG_SUMMARY"
-        FAILED_COUNT=$((FAILED_COUNT + 1)) # Or handle error appropriately
+        FAILED_COUNT=$((FAILED_COUNT + 1)) 
         cd ..
         continue
     fi
