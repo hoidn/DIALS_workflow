@@ -1,13 +1,20 @@
 indexing {
   refinement_protocol {
+    mode = refine_shells
+  }
+}
+
+refinement {
+  parameterisation {
     detector {
       fix = None
-      parameterisation {
-        type = single
-        single_panel {
-          level = 1
-        }
-      }
+      hierarchy_level = 0
+    }
+    // beam { fix = None } // uncomment if you want to refine beam too
+  }
+  reflections {
+    outlier {
+      algorithm = null
     }
   }
 }
