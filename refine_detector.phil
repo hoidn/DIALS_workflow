@@ -2,13 +2,13 @@ refinement {
   parameterisation {
     detector {
       fix = None
-      hierarchy_level = 0 // Explicitly refine the top-level detector group
+      hierarchy_level = 0 
     }
     beam {
       fix = None
     }
     crystal {
-      fix = cell // Keep cell fixed during this geometry-focused refinement
+      fix = cell 
     }
   }
   reflections {
