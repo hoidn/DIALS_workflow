@@ -12,22 +12,17 @@ INDEXED_REFL_FILE = "indexed_refined_detector.refl" # Changed
 # --- Helper function to get q_bragg ---
 def get_q_bragg_from_reflection(refl, experiment):
     """
-    Return q = R · A · (h,k,l) in the DIALS lab frame (Å⁻¹),
-    where R is the goniometer rotation.
+    Return q_bragg in the DIALS laboratory frame (Å⁻¹) using the
+    crystal model's hkl_to_reciprocal_space_vec method.
+    This method handles all necessary frame transformations (C·S·F·A).
     DIALS units (1/λ).
     """
-    A = matrix.sqr(experiment.crystal.get_A())      # Crystal setting matrix
-    S = matrix.sqr(experiment.goniometer.get_setting_rotation()) # Goniometer setting rotation
-    F = matrix.sqr(experiment.goniometer.get_fixed_rotation())   # Goniometer fixed rotation
-    R = S * F                                       # Total lab rotation
-
     hkl_vec = matrix.col(refl["miller_index"])      # Column vector (h, k, l)
-    q_bragg_lab_scitbx = R * A * hkl_vec            # Apply full rotation: R * A * hkl
-
-    q_bragg_np = np.array(q_bragg_lab_scitbx.elems) # Convert to NumPy
     
-    # The Y-flip is no longer needed as R handles the frame transformation.
-    # q_bragg_np[1] *= -1 
+    # experiment.crystal.hkl_to_reciprocal_space_vec returns a scitbx.matrix.col object
+    q_bragg_lab_scitbx = experiment.crystal.hkl_to_reciprocal_space_vec(hkl_vec)
+    
+    q_bragg_np = np.array(q_bragg_lab_scitbx.elems) # Convert to NumPy array
     
     return q_bragg_np
 
