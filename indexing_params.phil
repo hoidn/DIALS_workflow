@@ -10,7 +10,6 @@ refinement {
       fix = None
       hierarchy_level = 0
     }
-    // beam { fix = None } // uncomment if you want to refine beam too
   }
   reflections {
     outlier {

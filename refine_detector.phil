@@ -1,20 +1,11 @@
 refinement {
   parameterisation {
     detector {
-      fix = None
+      fix = all
       hierarchy_level = 0 
     }
     beam {
-      fix = None // Corrected: Allow beam to refine
-    }
-    crystal {
-      fix = cell // Keep cell fixed for now
-    }
-    scan_varying = False // *** ADD THIS LINE TO DISABLE SCAN-VARYING REFINEMENT ***
-  }
-  reflections {
-    outlier {
-      algorithm = null
+      fix = all
     }
   }
 }
