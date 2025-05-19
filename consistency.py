@@ -95,22 +95,43 @@ for i in range(len(reflections_indexed)):
     # For q-map lookup, we need integer pixel indices (fast_px_idx, slow_px_idx)
     # DIALS pixel coordinates are (fast_scan_coord, slow_scan_coord)
     # NumPy array indexing is typically (row_idx=slow_scan, col_idx=fast_scan)
-    x_obs_px, y_obs_px, _ = refl['xyzcal.px.value']
-    #x_obs_px, y_obs_px, _ = refl['xyzobs.px.value']
     
-    # Convert observed pixel coordinates (float) to integer indices
-    # DIALS coordinates: fast (x), slow (y)
-    px_idx = int(round(x_obs_px)) # Fast scan = column index
-    py_idx = int(round(y_obs_px)) # Slow scan = row index
+    # b. Get MILLIMETER coordinates and panel ID for this Bragg peak from the refined values
+    # 'xyzcal.mm' gives (x_mm, y_mm, frame_mm_equivalent_if_scan)
+    # For stills, the third component might be less meaningful or 0.
+    x_cal_mm, y_cal_mm, _ = refl['xyzcal.mm'] 
 
-    # c. Recalculate q_pixel for this specific pixel using the current experiment's models
-    beam_model_current = current_experiment.beam
+    # c. Convert mm coordinates on the panel to pixel indices
+    # panel.millimeter_to_pixel() takes (fast_mm_coord, slow_mm_coord) *in the panel's 2D coordinate system*
+    # We have x_cal_mm, y_cal_mm from refl['xyzcal.mm']. These are ALREADY
+    # in the panel's 2D coordinate system (fast, slow directions).
+    
+    beam_model_current = current_experiment.beam # Ensure these are defined before try block
     detector_model_current = current_experiment.detector
     if panel_id >= len(detector_model_current):
         print(f"  Warning: Panel ID {panel_id} out of range for detector. Skipping reflection {i}.")
         continue
     panel_model_current = detector_model_current[panel_id]
+
+    try:
+        fast_px_cal, slow_px_cal = panel_model_current.millimeter_to_pixel((x_cal_mm, y_cal_mm))
+    except RuntimeError as e:
+        print(f"  Warning: Could not convert mm to pixel for reflection {i} (panel {panel_id}): {e}")
+        print(f"    xyzcal.mm: ({x_cal_mm}, {y_cal_mm})")
+        # Fallback or skip if necessary
+        try:
+            print("    Falling back to xyzobs.px.value for q_pixel calculation.")
+            x_obs_px, y_obs_px, _ = refl['xyzobs.px.value']
+            px_idx = int(round(x_obs_px))
+            py_idx = int(round(y_obs_px))
+        except KeyError:
+            print(f"    xyzobs.px.value also not found. Skipping reflection {i}.")
+            continue # Skip this reflection
+    else: # If millimeter_to_pixel was successful
+        px_idx = int(round(fast_px_cal))
+        py_idx = int(round(slow_px_cal))
     
+    # d. Recalculate q_pixel for this specific pixel using the current experiment's models
     q_pixel_recalculated = calculate_q_for_single_pixel(beam_model_current, panel_model_current, px_idx, py_idx)
 
     if i == 0: # Detailed print for the first reflection
