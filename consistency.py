@@ -10,33 +10,16 @@ INDEXED_REFL_FILE = "indexed.refl"
 # ---------------------
 
 # --- Helper function to get q_bragg ---
-def get_q_bragg_from_reflection(reflection, experiment):
-    """Return q = h a* + k b* + l c* in the lab frame (Å⁻¹)."""
-    h, k, l = reflection['miller_index']
-    crystal_model = experiment.crystal
+def get_q_bragg_from_reflection(refl, experiment):
+    """
+    Return q = A · (h,k,l) in the DIALS lab frame (Å⁻¹).
+    No transposes, no sign flips, DIALS units (1/λ).
+    """
+    A = matrix.sqr(experiment.crystal.get_A())       # 3×3 matrix, row-major
+    hkl = matrix.col(refl["miller_index"])           # column vector (h, k, l)
+    q_scitbx = A * hkl                               # matrix × vector
 
-    # A_matrix_elements is the 9-tuple from crystal.get_A(), row-major: (A11,A12,A13, A21,A22,A23, A31,A32,A33)
-    A_matrix_elements = crystal_model.get_A()
-
-    # Columns of A are a*, b*, c*:
-    # a* = (A11, A21, A31)
-    # b* = (A12, A22, A32)
-    # c* = (A13, A23, A33)
-    a_star_vec = matrix.col((A_matrix_elements[0], A_matrix_elements[3], A_matrix_elements[6]))
-    b_star_vec = matrix.col((A_matrix_elements[1], A_matrix_elements[4], A_matrix_elements[7]))
-    c_star_vec = matrix.col((A_matrix_elements[2], A_matrix_elements[5], A_matrix_elements[8]))
-
-    # q_bragg = h * a* + k * b* + l * c*
-    q_bragg_scitbx = h * a_star_vec + k * b_star_vec + l * c_star_vec
-    
-    q_bragg_np = np.array(q_bragg_scitbx.elems)
-    
-    # Apply Y-flip correction to Q_BRAGG
-    # This assumes the A matrix from DIALS gives q_y in an inverted sense
-    # compared to the detector/beam lab frame's Y axis.
-    q_bragg_np[1] = -q_bragg_np[1] 
-    
-    return q_bragg_np
+    return np.array(q_scitbx.elems)                  # convert to NumPy
 
 # --- Helper function to calculate q_pixel for a specific pixel (like in pixq.py) ---
 def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_idx):
