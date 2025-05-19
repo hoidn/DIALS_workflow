@@ -12,18 +12,22 @@ INDEXED_REFL_FILE = "indexed_refined_detector.refl" # Changed
 # --- Helper function to get q_bragg ---
 def get_q_bragg_from_reflection(refl, experiment):
     """
-    Return q = A · (h,k,l) in the DIALS lab frame (Å⁻¹).
-    No transposes, no sign flips, DIALS units (1/λ).
+    Return q = R · A · (h,k,l) in the DIALS lab frame (Å⁻¹),
+    where R is the goniometer rotation.
+    DIALS units (1/λ).
     """
-    A = matrix.sqr(experiment.crystal.get_A())       # 3×3 matrix, row-major
-    hkl = matrix.col(refl["miller_index"])           # column vector (h, k, l)
-    q_scitbx = A * hkl                               # matrix × vector
+    A = matrix.sqr(experiment.crystal.get_A())      # Crystal setting matrix
+    S = matrix.sqr(experiment.goniometer.get_setting_rotation()) # Goniometer setting rotation
+    F = matrix.sqr(experiment.goniometer.get_fixed_rotation())   # Goniometer fixed rotation
+    R = S * F                                       # Total lab rotation
 
-    q_bragg_np = np.array(q_scitbx.elems)            # convert to NumPy
+    hkl_vec = matrix.col(refl["miller_index"])      # Column vector (h, k, l)
+    q_bragg_lab_scitbx = R * A * hkl_vec            # Apply full rotation: R * A * hkl
+
+    q_bragg_np = np.array(q_bragg_lab_scitbx.elems) # Convert to NumPy
     
-    # Apply Y-flip correction to Q_BRAGG to match the detector/beam lab frame's Y axis
-    # This is based on empirical observation for this specific dataset/setup.
-    q_bragg_np[1] *= -1 # <--- ENSURE THIS IS ACTIVE (UNCOMMENTED)
+    # The Y-flip is no longer needed as R handles the frame transformation.
+    # q_bragg_np[1] *= -1 
     
     return q_bragg_np
 
