@@ -19,7 +19,13 @@ def get_q_bragg_from_reflection(refl, experiment):
     hkl = matrix.col(refl["miller_index"])           # column vector (h, k, l)
     q_scitbx = A * hkl                               # matrix × vector
 
-    return np.array(q_scitbx.elems)                  # convert to NumPy
+    q_bragg_np = np.array(q_scitbx.elems)            # convert to NumPy
+    
+    # Apply Y-flip correction to Q_BRAGG to match the detector/beam lab frame's Y axis
+    # This is based on empirical observation for this specific dataset/setup.
+    q_bragg_np[1] *= -1
+    
+    return q_bragg_np
 
 # --- Helper function to calculate q_pixel for a specific pixel (like in pixq.py) ---
 def calculate_q_for_single_pixel(beam_model, panel_model, px_fast_idx, py_slow_idx):
