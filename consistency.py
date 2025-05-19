@@ -9,6 +9,30 @@ INDEXED_EXPT_FILE = "indexed_refined_detector.expt" # Changed
 INDEXED_REFL_FILE = "indexed_refined_detector.refl" # Changed
 # ---------------------
 
+# --- Helper function to convert hkl to q in lab frame (dxtbx version independent) ---
+def hkl_to_lab_q(experiment, hkl_vec):
+    """
+    Convert an hkl column vector → reciprocal-space vector in the DIALS
+    laboratory frame, for all dxtbx versions.
+    """
+    # 1. crystal UB (in goniometer coordinates)
+    A = matrix.sqr(experiment.crystal.get_A())
+
+    # 2. static goniometer rotations
+    S = matrix.sqr(experiment.goniometer.get_setting_rotation())
+    F = matrix.sqr(experiment.goniometer.get_fixed_rotation())
+
+    # 3. coordinate-frame correction  (-90° about +x)
+    #    lab_x = goniometer_x
+    #    lab_y = -goniometer_z
+    #    lab_z =  goniometer_y
+    C = matrix.sqr((1,0,0,
+                    0,0,-1,
+                    0,1,0))
+
+    R_lab = C * S * F           # total rotation gonio → lab
+    return R_lab * A * hkl_vec  # column vector
+
 # --- Helper function to get q_bragg ---
 def get_q_bragg_from_reflection(refl, experiment):
     """
@@ -19,8 +43,7 @@ def get_q_bragg_from_reflection(refl, experiment):
     """
     hkl_vec = matrix.col(refl["miller_index"])      # Column vector (h, k, l)
     
-    # experiment.crystal.hkl_to_reciprocal_space_vec returns a scitbx.matrix.col object
-    q_bragg_lab_scitbx = experiment.crystal.hkl_to_reciprocal_space_vec(hkl_vec)
+    q_bragg_lab_scitbx = hkl_to_lab_q(experiment, hkl_vec)
     
     q_bragg_np = np.array(q_bragg_lab_scitbx.elems) # Convert to NumPy array
     
