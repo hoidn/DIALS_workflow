@@ -112,6 +112,26 @@ for i in range(len(reflections_indexed)):
     
     q_pixel_recalculated = calculate_q_for_single_pixel(beam_model_current, panel_model_current, px_idx, py_idx)
 
+    if i == 0: # Detailed print for the first reflection
+        print(f"\n--- Detailed Debug for Refl {i} ---")
+        hkl_tuple = refl['miller_index']
+        print(f"  Miller Index (hkl): {hkl_tuple}")
+        
+        A_matrix_sqr = matrix.sqr(current_experiment.crystal.get_A())
+        print(f"  A-matrix elements: {A_matrix_sqr.elems}")
+        
+        hkl_col = matrix.col(hkl_tuple)
+        q_scitbx_manual = A_matrix_sqr * hkl_col
+        q_bragg_np_unflipped = np.array(q_scitbx_manual.elems)
+        print(f"  q_bragg (A*hkl, unflipped): {q_bragg_np_unflipped.tolist()}")
+        
+        q_bragg_np_flipped = q_bragg_np_unflipped.copy()
+        q_bragg_np_flipped[1] *= -1
+        print(f"  q_bragg (A*hkl, Y-flipped by script): {q_bragg_np_flipped.tolist()}") # This should match q_bragg variable
+        
+        print(f"  q_pixel_recalculated (for comparison): {q_pixel_recalculated.tolist()}")
+        print(f"--- End Detailed Debug for Refl {i} ---\n")
+
     # d. Compare q_bragg (from A matrix) with q_pixel_recalculated
     q_difference = q_bragg - q_pixel_recalculated
     diff_magnitude = np.linalg.norm(q_difference)
