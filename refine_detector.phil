@@ -7,5 +7,14 @@ refinement {
     beam {
       fix = all
     }
+    crystal {
+      fix = cell // Keep cell fixed for now
+    }
+    scan_varying = False 
+  }
+  reflections {
+    outlier {
+      algorithm = null
+    }
   }
 }
