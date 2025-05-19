@@ -1,0 +1,10 @@
+spotfinder {
+  threshold {
+    algorithm = dispersion
+    dispersion {
+      sigma_strong = 3 # Or your desired value
+      # You can also set other dispersion parameters here if needed,
+      # e.g., sigma_background, kernel_size, min_count
+    }
+  }
+}
