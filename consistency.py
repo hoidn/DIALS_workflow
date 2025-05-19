@@ -5,8 +5,8 @@ from scitbx import matrix # For matrix/vector operations with crystal model
 import math
 
 # --- Configuration ---
-INDEXED_EXPT_FILE = "indexed.expt"
-INDEXED_REFL_FILE = "indexed.refl"
+INDEXED_EXPT_FILE = "indexed_refined_detector.expt" # Changed
+INDEXED_REFL_FILE = "indexed_refined_detector.refl" # Changed
 # ---------------------
 
 # --- Helper function to get q_bragg ---
@@ -23,7 +23,7 @@ def get_q_bragg_from_reflection(refl, experiment):
     
     # Apply Y-flip correction to Q_BRAGG to match the detector/beam lab frame's Y axis
     # This is based on empirical observation for this specific dataset/setup.
-    q_bragg_np[1] *= -1 
+    q_bragg_np[1] *= -1 # <--- ENSURE THIS IS ACTIVE (UNCOMMENTED)
     
     return q_bragg_np
 
