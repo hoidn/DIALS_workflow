@@ -149,8 +149,9 @@ for cbf_file in "$@"; do
 
     # 4. dials.refine (dedicated refinement of detector and beam geometry using PHIL)
     echo "Step 4: Running dials.refine (for detector and beam geometry using PHIL)..."
+    # The PHIL file path is ../refine_detector.phil
     dials.refine indexed_initial.expt indexed_initial.refl \
-      "../refine_detector.phil" \ # Correct path to your PHIL file
+      "../refine_detector.phil" \
       output.experiments=indexed_refined_detector.expt \
       output.reflections=indexed_refined_detector.refl \
       > dials.refine.log 2>&1
