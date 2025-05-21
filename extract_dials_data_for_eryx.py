@@ -126,89 +126,81 @@ def calculate_misorientation(A1_matrix, A2_matrix):
     a_inv = angle(A1_matrix, [-x for x in A2_matrix])  # inverted hand
     return min(a, a_inv)
 
-def check_pdb_consistency(experiments, ext_pdb_symm, len_tol, ang_tol, orient_tol_deg, verb):
-    if not ext_pdb_symm: return True
-    ok = True
-    # The PDB crystal symmetry object (ext_pdb_symm) gives cell & space group.
-    # For orientation, we need its A matrix. cctbx.crystal.symmetry objects
-    # don't store an explicit orientation unless they were created from a model
-    # that has one (e.g. a dxtbx Crystal object).
-    # We assume the external PDB provides cell parameters, and DIALS orients its model
-    # relative to this PDB if used as reference_geometry.
-    # The A matrix from ext_pdb_symm will be based on its unit cell and a conventional setting.
-    
-    # Get B matrix for external PDB (conventional setting)
-    B_pdb_conventional = matrix.sqr(ext_pdb_symm.unit_cell().orthogonalization_matrix())
-    # For a PDB used as reference_geometry, DIALS's refined U matrix should be close to identity
-    # if the PDB itself was in a standard setting.
-    # So A_pdb_ref = U_ref * B_pdb_conventional. If U_ref is identity, A_pdb_ref = B_pdb_conventional.
-    # This is an approximation if the PDB had a non-standard orientation that DIALS tried to match.
-    # A more robust way for PDBs *without* explicit orientation:
-    # The key is that DIALS's refinement used the PDB as reference_geometry.
-    # So the DIALS crystal model's A matrix IS the one to compare against a hypothetical A matrix
-    # formed from the PDB's cell constants and an *ideal* orientation (e.g. U=identity).
-    
-    # Let's assume DIALS' A matrix should be compared against the PDB's conventional A matrix.
-    # This means we expect the DIALS U matrix to be identity if the PDB was conventionally aligned.
-    # For external PDB, A = U_pdb * B_pdb. If PDB has no specific U, U_pdb = Identity.
-    # So, A_pdb_ref = B_pdb_conventional (assuming U_pdb = Identity)
-    A_pdb_ref = B_pdb_conventional
+def check_pdb_consistency(experiments, ext_pdb_symm, len_tol, ang_tol, orient_tol_deg, verbose_flag):
+    if not ext_pdb_symm:
+        logger.warning("External PDB symmetry not loaded, skipping consistency check.")
+        return True # Or False, depending on how strict you want to be if PDB is missing
 
+    overall_consistency_ok = True
+    ext_uc = ext_pdb_symm.unit_cell()
+    ext_sg_info = ext_pdb_symm.space_group_info()
+    
+    # Calculate reference A matrix from external PDB's cell (conventional setting U=I)
+    try:
+        B_pdb_conventional = matrix.sqr(ext_pdb_symm.unit_cell().fractionalization_matrix()).inverse()
+        A_pdb_ref = B_pdb_conventional # This is B matrix for PDB (assuming U is identity)
+    except Exception as e:
+        logger.error(f"Error calculating PDB reference matrix: {e}")
+        return False
 
     for i, exp in enumerate(experiments):
+        logger.info(f"--- PDB Consistency Check for Experiment {i} ---")
         exp_crystal = exp.crystal
         exp_cs = exp_crystal.get_crystal_symmetry()
         exp_uc = exp_cs.unit_cell()
-        ext_uc = ext_pdb_symm.unit_cell()
+
+        if verbose_flag:
+            logger.info(f"  DIALS Experiment Cell: {exp_uc.parameters()}")
+            logger.info(f"  External PDB Cell: {ext_uc.parameters()}")
         
-        if verb: 
-            print(f"PDB Check Exp {i}:\n  Exp Cell: {exp_uc}\n  PDB Cell: {ext_uc}")
-            
         # Cell similarity
         if not exp_uc.is_similar_to(
             other=ext_uc, 
-            relative_length_tolerance=len_tol,
+            relative_length_tolerance=len_tol, 
             absolute_angle_tolerance=ang_tol
         ):
-            print(f"Warning Exp {i} CELL MISMATCH! Exp: {exp_uc} vs PDB: {ext_uc}")
-            ok = False
-            
+            logger.warning(f"  Exp {i} CELL MISMATCH (Tol: rel_len={len_tol}, abs_ang={ang_tol} deg)!")
+            logger.warning(f"    DIALS Cell: {exp_uc.parameters()}")
+            logger.warning(f"    PDB Cell: {ext_uc.parameters()}")
+            overall_consistency_ok = False
+        
         # Space group
         exp_sg_info = exp_cs.space_group_info()
-        ext_sg_info = ext_pdb_symm.space_group_info()
         if exp_sg_info.type().number() != ext_sg_info.type().number():
-            print(f"Warning Exp {i} SPACE GROUP MISMATCH! Exp: {exp_sg_info.symbol_and_number()} vs PDB: {ext_sg_info.symbol_and_number()}")
-            ok = False
+            logger.warning(f"  Exp {i} SPACE GROUP MISMATCH!")
+            logger.warning(f"    DIALS SG: {exp_sg_info.symbol_and_number()}")
+            logger.warning(f"    PDB SG: {ext_sg_info.symbol_and_number()}")
+            overall_consistency_ok = False
 
         # Orientation
-        # A_expt is the orientation matrix from DIALS experiment (refined)
-        A_expt = matrix.sqr(exp_crystal.get_A()) 
-        
-        # If the PDB defines a crystal (e.g. from CRYST1 card), it has cell params.
-        # If it also has coordinates, it implies an orientation.
-        # However, ext_pdb_symm is a cctbx.crystal_symmetry, usually derived from CRYST1 only.
-        # For orientation, we need to construct an A matrix for the PDB.
-        # If the PDB was used as reference_geometry, DIALS crystal model (A_expt)
-        # should be aligned to it. The PDB itself, if it has coordinates, defines its own A matrix.
-        # A simple PDB file might not have an explicit U matrix.
-        # For now, let's use the A matrix from the PDB's unit cell parameters in a standard setting (U=I).
-        # A_pdb_standard_setting = matrix.sqr(ext_pdb_symm.unit_cell().orthogonalization_matrix())
-        # This A_pdb_standard_setting is what A_pdb_ref is above.
+        try:
+            A_elements_tuple = exp_crystal.get_A() # This is UB from DIALS
+            A_expt = matrix.sqr(A_elements_tuple) # scitbx.matrix.sqr object
 
-        misorientation_deg = calculate_misorientation(A_expt, A_pdb_ref)
-        
-        if verb:
-            print(f"  Exp A matrix: {A_expt.round(5).as_string()}")
-            # print(f"  PDB Ref A matrix (from PDB cell, U=I): {A_pdb_ref.round(5).as_string()}")
-            print(f"  Misorientation (Exp vs PDB standard cell): {misorientation_deg:.3f} degrees")
+            if verbose_flag:
+                logger.info(f"  DIALS A matrix (UB_dials) elements: {list(A_expt)}")
+                # Use str() instead of as_string() for safer printing
+                logger.info(f"  DIALS A matrix (UB_dials): {str(A_expt)}")
+                logger.info(f"  PDB B matrix (B_pdb_ref): {str(A_pdb_ref)}")
 
-        if misorientation_deg > orient_tol_deg:
-            print(f"Warning Exp {i} ORIENTATION MISMATCH! Misorientation: {misorientation_deg:.3f} deg > tolerance {orient_tol_deg:.3f} deg.")
-            ok = False
+            # Calculate misorientation
+            misorientation_deg = calculate_misorientation(A_expt, A_pdb_ref)
             
-    if ok and verb: print("PDB cell, space group, and orientation consistency OK.")
-    elif not ok and verb: print("PDB consistency check found issues.")
-    return ok
+            if verbose_flag:
+                logger.info(f"  Misorientation (DIALS vs PDB): {misorientation_deg:.3f} degrees")
+
+            if misorientation_deg > orient_tol_deg:
+                logger.warning(f"  Exp {i} ORIENTATION MISMATCH! Misorientation: {misorientation_deg:.3f} deg > tolerance {orient_tol_deg:.3f} deg.")
+                overall_consistency_ok = False
+        except Exception as e_orient:
+            logger.error(f"  Error during orientation check for Exp {i}: {e_orient}")
+            overall_consistency_ok = False
+            
+    if overall_consistency_ok and verbose_flag:
+        logger.info("--- PDB cell, space group, and orientation consistency OK. ---")
+    elif not overall_consistency_ok:
+        logger.warning("--- PDB consistency check found issues. ---")
+    return overall_consistency_ok
 
 def calculate_q_for_pixel_batch(beam, panel, fast_coords, slow_coords):
     s0=np.array(beam.get_s0()); k_mag=np.linalg.norm(s0); q_out=[]
