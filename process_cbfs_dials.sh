@@ -1,294 +1,277 @@
 #!/bin/bash
 
-# Script to process one or more CBF files with DIALS for indexing.
+# Script to process CBF files using a simplified DIALS workflow (like the "old working" version)
+# and then call Python scripts for data extraction and consistency checks.
+# External PDB is used ONLY by the Python script for consistency checks.
+# DIALS uses hardcoded unit cell and space group, with the cell fixed during refinement.
 
 # --- Configuration ---
-# Known unit cell and space group for lysozyme P1 (EXAMPLE - OVERRIDE IF EXTERNAL PDB USED)
-# UNIT_CELL="27.424,32.134,34.513,88.66,108.46,111.88" 
-# SPACE_GROUP="P1"
+# HARDCODED Unit cell and space group - MUST MATCH THE PDB USED FOR ERYX/CONSISTENCY CHECKS
+UNIT_CELL="27.424,32.134,34.513,88.66,108.46,111.88" # Example for 6o2h.pdb (Triclinic Lysozyme P1)
+SPACE_GROUP="P1"                                     # Example for 6o2h.pdb
 
-# Path to the PHIL file for dials.find_spots
+# Path to PHIL files (assumed to be in the same directory as this script or CWD)
 FIND_SPOTS_PHIL_FILE="./find_spots.phil"
-# Path to general DIALS indexing PHIL file (can be overridden by command line)
-INDEXING_PHIL_FILE="./indexing_params.phil" 
-# Path to general DIALS refinement PHIL file (can be overridden by command line)
-REFINEMENT_PHIL_FILE="./refine_detector.phil" # Name suggests detector, but could be general
+# General PHIL for refinement - ensure this does NOT set reference_model or try to change cell if fix=cell is used.
+# It's primarily for detector/beam refinement parameters.
+REFINEMENT_PHIL_FILE="./refine_detector.phil" # Renamed for clarity
 
-# --- Configuration for extract_dials_data_for_eryx.py ---
-EXTRACT_MIN_RES=""
-EXTRACT_MAX_RES=""
-EXTRACT_MIN_INTENSITY=""
-EXTRACT_MAX_INTENSITY=""
+# DIALS parameters
+MIN_SPOT_SIZE=3
+
+# --- Configuration for Python Scripts ---
+EXTERNAL_PDB_FOR_ERYX_CHECK="" # To be set by --external_pdb argument
+
+# Filtering and processing parameters for the extraction script
+EXTRACT_MIN_RES="50.0" # d_max in Angstrom
+EXTRACT_MAX_RES="1.5"  # d_min in Angstrom
+EXTRACT_MIN_INTENSITY="0" # Minimum pixel intensity for diffuse data
+EXTRACT_MAX_INTENSITY="60000" # Maximum pixel intensity (saturation)
 EXTRACT_GAIN="1.0"
-EXTRACT_CELL_LENGTH_TOL="0.1"
-EXTRACT_CELL_ANGLE_TOL="1.0"
-EXTRACT_ORIENT_TOL_DEG="0.5"
-EXTRACT_PIXEL_STEP="1"
-EXTRACT_LP_CORRECTION_ENABLED=false  # Set to true to enable LP correction
-EXTRACT_SUBTRACT_BACKGROUND_VALUE="" # Set to a number to subtract a constant background
-EXTRACT_PLOT=false                  # Set to true to generate diagnostic plots
-EXTRACT_VERBOSE=false               # Set to true for detailed output
-RUN_DIAGNOSTICS=true # Set to false to skip q-map generation and consistency checks
+EXTRACT_CELL_LENGTH_TOL="0.01" # Tolerance for Python script's cell check
+EXTRACT_CELL_ANGLE_TOL="0.1"  # Tolerance for Python script's cell check
+EXTRACT_ORIENT_TOL_DEG="1.0"  # Orientation tolerance vs external PDB in Python script
+EXTRACT_PIXEL_STEP="1"        # Process every Nth pixel in Python script
+EXTRACT_LP_CORRECTION_ENABLED=false # Enable simplified LP correction in Python script
+EXTRACT_SUBTRACT_BACKGROUND_VALUE="" # Constant value to subtract from pixels in Python script
+EXTRACT_PLOT=false            # Generate diagnostic plots from Python extraction script
+EXTRACT_VERBOSE_PYTHON=false  # Verbose output from Python scripts
+
+# Diagnostic script execution
+RUN_DIAGNOSTICS=true # Set to false to skip calculate_q_per_pixel.py and check_q_vector_consistency.py
 # --------------------------------------------------------
 
-MIN_SPOT_SIZE=3
-AUTO_VIEW_SPOTFINDING=false
-AUTO_VIEW_INDEXING_IMAGE=false
-AUTO_VIEW_INDEXING_RECIP=false
-
 # --- Script Logic ---
-
-# Argument parsing: Expect CBF files and an optional external PDB file
-# If --external_pdb is provided, it should be the last argument before CBF files.
-
-EXTERNAL_PDB_PATH=""
 CBF_FILES=()
-
+# Argument parsing
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --external_pdb)
-      EXTERNAL_PDB_PATH="$2"
-      shift # past argument
-      shift # past value
-      ;; 
-    *.cbf)
-      CBF_FILES+=("$1")
-      shift # past argument
+      EXTERNAL_PDB_FOR_ERYX_CHECK="$2"
+      shift 2
       ;;
-    *)
-      echo "Unknown option: $1" >&2
-      # Assuming any other args might be CBF files if not starting with --
-      # This is a simple parser; a more robust one would use getopts or a Python wrapper.
-      if [[ "$1" != --* ]]; then 
-          CBF_FILES+=("$1")
-      fi
-      shift
+    --run_diagnostics)
+      if [[ "$2" == "true" || "$2" == "false" ]]; then RUN_DIAGNOSTICS="$2"; shift 2;
+      else echo "Error: --run_diagnostics requires true or false." >&2; exit 1; fi
       ;;
+    --verbose) EXTRACT_VERBOSE_PYTHON=true; shift ;;
+    *.cbf) CBF_FILES+=("$1"); shift ;;
+    *) if [[ "$1" != --* ]]; then CBF_FILES+=("$1"); else echo "Unknown option: $1" >&2; fi; shift ;;
   esac
 done
 
-# Check if external PDB is provided, error if not for eryx workflow (primary use case)
-if [ -z "$EXTERNAL_PDB_PATH" ]; then
-    echo ""
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    echo "! ERROR: --external_pdb not provided.                                                 !"
-    echo "! For the primary eryx data preparation workflow, an external PDB is REQUIRED         !"
-    echo "! to constrain the unit cell, space group, and reference orientation.               !"
-    echo "! If you intend to run general DIALS processing without PDB constraints,            !"
-    echo "! please modify this script or use DIALS commands directly.                         !"
-    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
-    echo ""
-    exit 1 # Exit due to missing critical PDB for eryx workflow
-fi
+# Mandatory check for external PDB (for Python script's consistency check)
+if [ -z "$EXTERNAL_PDB_FOR_ERYX_CHECK" ]; then echo "ERROR: --external_pdb <path> is REQUIRED for Python script consistency checks." >&2; exit 1; fi
+if [ ! -f "$EXTERNAL_PDB_FOR_ERYX_CHECK" ]; then echo "Error: External PDB for eryx check not found at $EXTERNAL_PDB_FOR_ERYX_CHECK" >&2; exit 1; fi
+if [ ${#CBF_FILES[@]} -eq 0 ]; then echo "Usage: $0 --external_pdb <path_to_pdb_for_eryx_check> <cbf_file1> [cbf_file2 ...]"; exit 1; fi
+if [ ! -f "$FIND_SPOTS_PHIL_FILE" ]; then echo "Error: Spot finding PHIL not found at $FIND_SPOTS_PHIL_FILE" >&2; exit 1; fi
 
-# Now check if the specified PDB file actually exists
-if [ ! -f "$EXTERNAL_PDB_PATH" ]; then # This check was already here, just ensuring it's after the above.
-    echo "Error: External PDB file not found at $EXTERNAL_PDB_PATH" >&2
-    exit 1
-fi
-
-
-if [ ${#CBF_FILES[@]} -eq 0 ]; then
-    echo "Usage: $0 --external_pdb <path_to_pdb> <cbf_file1> [cbf_file2 ...]"
-    echo "Example: $0 --external_pdb ./6o2h.pdb my_image_001.cbf"
-    exit 1
-fi
-
-if [ -n "$EXTERNAL_PDB_PATH" ] && [ ! -f "$EXTERNAL_PDB_PATH" ]; then
-    echo "Error: External PDB file not found at $EXTERNAL_PDB_PATH" >&2
-    exit 1
-fi
-
-if [ ! -f "$FIND_SPOTS_PHIL_FILE" ]; then
-    echo "Error: PHIL file for spot finding not found at $FIND_SPOTS_PHIL_FILE" >&2
-    exit 1
-fi
 
 START_TIME=$(date +%s)
 PROCESSED_COUNT=0
-FAILED_COUNT=0
-ROOT_DIR=$(pwd)
+FAILED_DIALS_STEPS=0
+FAILED_EXTRACTION_STEPS=0
+ROOT_DIR=$(pwd) # Directory where the script is launched
 LOG_SUMMARY="$ROOT_DIR/dials_processing_summary.log"
 
-echo "DIALS Processing Summary - $(date)" > "$LOG_SUMMARY"
-echo "-------------------------------------" >> "$LOG_SUMMARY"
-if [ -n "$EXTERNAL_PDB_PATH" ]; then
-    echo "Using External PDB: $EXTERNAL_PDB_PATH" >> "$LOG_SUMMARY"
-fi
+# Initialize Summary Log
+echo "DIALS & Extraction Processing Summary - $(date)" > "$LOG_SUMMARY"
+echo "-------------------------------------------------" >> "$LOG_SUMMARY"
+echo "Script Root Directory: $ROOT_DIR" >> "$LOG_SUMMARY"
+echo "Using DIALS Unit Cell (hardcoded): $UNIT_CELL" >> "$LOG_SUMMARY"
+echo "Using DIALS Space Group (hardcoded): $SPACE_GROUP" >> "$LOG_SUMMARY"
+echo "External PDB for Python script consistency check: $EXTERNAL_PDB_FOR_ERYX_CHECK" >> "$LOG_SUMMARY"
+echo "Diagnostic scripts will run: $RUN_DIAGNOSTICS" >> "$LOG_SUMMARY"
+echo "Python script verbosity: $EXTRACT_VERBOSE_PYTHON" >> "$LOG_SUMMARY"
+echo "-------------------------------------------------" >> "$LOG_SUMMARY"
 
-for cbf_file in "${CBF_FILES[@]}"; do
-    if [ ! -f "$cbf_file" ]; then
-        echo "Warning: File $cbf_file not found. Skipping."
-        echo "File $cbf_file not found. Skipped." >> "$LOG_SUMMARY"
-        FAILED_COUNT=$((FAILED_COUNT + 1))
+
+for cbf_file_rel_path in "${CBF_FILES[@]}"; do
+    cbf_file_abs_path=$(realpath "$cbf_file_rel_path") 
+
+    if [ ! -f "$cbf_file_abs_path" ]; then
+        echo "Warning: CBF file $cbf_file_rel_path (abs: $cbf_file_abs_path) not found. Skipping." | tee -a "$LOG_SUMMARY"
+        FAILED_DIALS_STEPS=$((FAILED_DIALS_STEPS + 1))
         continue
     fi
 
+    echo ""
     echo "---------------------------------------------------------------------"
-    echo "Processing: $cbf_file"
-    echo "Processing: $cbf_file" >> "$LOG_SUMMARY"
+    echo "Processing: $cbf_file_rel_path (abs: $cbf_file_abs_path)"
+    echo "Processing: $cbf_file_rel_path" >> "$LOG_SUMMARY"
     PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
 
-    base_name=$(basename "$cbf_file" .cbf)
-    work_dir="${base_name}_dials_processing"
+    base_name=$(basename "$cbf_file_rel_path" .cbf)
+    work_dir="$ROOT_DIR/${base_name}_dials_processing"
     mkdir -p "$work_dir"
-    cd "$work_dir" || { echo "Error: Could not change to directory $work_dir. Skipping $cbf_file."; FAILED_COUNT=$((FAILED_COUNT + 1)); cd "$ROOT_DIR"; continue; }
+    
+    pushd . > /dev/null # Save current directory
+    cd "$work_dir" || { echo "Error: Could not change to directory $work_dir. Skipping $cbf_file_rel_path."; FAILED_DIALS_STEPS=$((FAILED_DIALS_STEPS + 1)); popd > /dev/null; continue; }
 
     echo "Working directory: $(pwd)"
+    CURRENT_FILE_DIALS_SUCCESS=true
 
-    DIALS_SUCCESS=true
+    # === DIALS STEPS (Simplified calls, similar to "old working" script) ===
+    # Output names for intermediate DIALS files
+    IMPORTED_EXPT="imported.expt"
+    STRONG_REFL="strong.refl"
+    INDEXED_EXPT="indexed.expt" # Changed from indexed_initial for simplicity
+    INDEXED_REFL="indexed.refl" # Changed from indexed_initial
+    REFINED_EXPT="refined.expt" # Final refined experiment for Python scripts
+    REFINED_REFL="refined.refl" # Final refined reflections
+    BRAGG_MASK="bragg_mask.pickle"
 
     # 1. dials.import
     echo "Step 1: Running dials.import..."
-    dials.import "../$cbf_file" output.experiments=imported.expt > dials.import.log 2>&1
-    if [ $? -ne 0 ] || [ ! -f imported.expt ]; then DIALS_SUCCESS=false; echo "Error: dials.import failed. See $work_dir/dials.import.log" >> "$LOG_SUMMARY"; fi
+    dials.import "$cbf_file_abs_path" output.experiments="$IMPORTED_EXPT" > dials.import.log 2>&1
+    if [ $? -ne 0 ] || [ ! -s "$IMPORTED_EXPT" ]; then 
+        CURRENT_FILE_DIALS_SUCCESS=false
+        echo "Error: dials.import failed for $cbf_file_rel_path. Check log in $(pwd)" >> "$LOG_SUMMARY"
+    fi
 
     # 2. dials.find_spots
-    if $DIALS_SUCCESS; then
+    if $CURRENT_FILE_DIALS_SUCCESS; then
         echo "Step 2: Running dials.find_spots..."
-        dials.find_spots imported.expt "../$FIND_SPOTS_PHIL_FILE" spotfinder.filter.min_spot_size=$MIN_SPOT_SIZE output.reflections=strong.refl output.shoeboxes=True > dials.find_spots.log 2>&1
-        if [ $? -ne 0 ] || [ ! -f strong.refl ]; then DIALS_SUCCESS=false; echo "Error: dials.find_spots failed. See $work_dir/dials.find_spots.log" >> "$LOG_SUMMARY"; 
+        dials.find_spots "$IMPORTED_EXPT" \
+          "$ROOT_DIR/$FIND_SPOTS_PHIL_FILE" \
+          spotfinder.filter.min_spot_size="$MIN_SPOT_SIZE" \
+          output.reflections="$STRONG_REFL" \
+          output.shoeboxes=True > dials.find_spots.log 2>&1
+        if [ $? -ne 0 ] || [ ! -s "$STRONG_REFL" ]; then
+            CURRENT_FILE_DIALS_SUCCESS=false
+            echo "Error: dials.find_spots failed for $cbf_file_rel_path. Check log." >> "$LOG_SUMMARY"
         else
-            SPOTS_FOUND=$(grep "Saved .* reflections to strong.refl" dials.find_spots.log | awk '{print $2}')
-            echo "Found $SPOTS_FOUND spots." >> "$LOG_SUMMARY"
-            if [ -z "$SPOTS_FOUND" ] || [ "$SPOTS_FOUND" -eq 0 ]; then echo "No spots found, cannot proceed." >> "$LOG_SUMMARY"; DIALS_SUCCESS=false; fi
+            SPOTS_FOUND=$(grep "Saved .* reflections to $STRONG_REFL" dials.find_spots.log | awk '{print $2}')
+            echo "Found $SPOTS_FOUND spots for $cbf_file_rel_path." >> "$LOG_SUMMARY"
+            if [ -z "$SPOTS_FOUND" ] || [ "$SPOTS_FOUND" -eq 0 ]; then
+                echo "Warning: No spots found by dials.find_spots for $cbf_file_rel_path. Cannot proceed." >> "$LOG_SUMMARY"
+                CURRENT_FILE_DIALS_SUCCESS=false
+            fi
         fi
     fi
 
-    # 3. dials.index 
-    INDEXING_ARGS=("imported.expt" "strong.refl" "output.experiments=indexed.expt" "output.reflections=indexed.refl")
-    # Note on PHIL file precedence: Command-line arguments generally override PHIL file settings.
-    # If EXTERNAL_PDB_PATH is provided, the known_symmetry.model and reference_model parameters
-    # passed directly on the command line are expected to take precedence over any conflicting
-    # settings in INDEXING_PHIL_FILE for cell, space group, and reference geometry.
-    if [ -f "../$INDEXING_PHIL_FILE" ]; then INDEXING_ARGS+=("../$INDEXING_PHIL_FILE"); fi
-
-    if [ -n "$EXTERNAL_PDB_PATH" ]; then
-        # Forcing use of external PDB for cell/SG, and as reference geometry
-        # This overrides any UNIT_CELL/SPACE_GROUP variables set in this script or PHIL files if they conflict.
-        # Updated parameter names for current DIALS versions
-        INDEXING_ARGS+=("indexing.known_symmetry.model=../$EXTERNAL_PDB_PATH" "indexing.reference_model.enabled=True" "indexing.reference_model.file=../$EXTERNAL_PDB_PATH")
-        # Remove default unit_cell/space_group if external PDB is used for these
-        # This depends on how DIALS prioritizes model vs explicit cell/sg parameters.
-        # For clarity, we might only specify the model.
-    else
-        # Fallback to script defaults if no external PDB and PHIL doesn't specify
-        # This path is no longer taken for eryx workflow as --external_pdb is mandatory.
-        # Keeping for completeness or if script is adapted for general use.
-        # INDEXING_ARGS+=("indexing.known_symmetry.unit_cell=$UNIT_CELL" "indexing.known_symmetry.space_group=$SPACE_GROUP")
-        echo "Warning: --external_pdb not provided logic path in dials.index reached. This should not happen for eryx workflow." >> "$LOG_SUMMARY"
-    fi
-
-    if $DIALS_SUCCESS; then
+    # 3. dials.index (using hardcoded cell/SG)
+    if $CURRENT_FILE_DIALS_SUCCESS; then
         echo "Step 3: Running dials.index..."
-        dials.index "${INDEXING_ARGS[@]}" > dials.index.log 2>&1
-        if [ $? -ne 0 ] || [ ! -f indexed.expt ] || [ ! -f indexed.refl ]; then DIALS_SUCCESS=false; echo "Error: dials.index failed. See $work_dir/dials.index.log" >> "$LOG_SUMMARY"; fi
+        INDEXING_COMMAND_ARGS=("$IMPORTED_EXPT" "$STRONG_REFL")
+        INDEXING_COMMAND_ARGS+=("indexing.known_symmetry.unit_cell=$UNIT_CELL")
+        INDEXING_COMMAND_ARGS+=("indexing.known_symmetry.space_group=$SPACE_GROUP")
+        # Add any other essential indexing parameters directly
+        INDEXING_COMMAND_ARGS+=("indexing.stills.indexer=stills" "indexing.max_cell=500") # Example
+        INDEXING_COMMAND_ARGS+=("output.experiments=$INDEXED_EXPT" "output.reflections=$INDEXED_REFL")
+        
+        dials.index "${INDEXING_COMMAND_ARGS[@]}" > dials.index.log 2>&1
+        if [ $? -ne 0 ] || [ ! -s "$INDEXED_EXPT" ] || [ ! -s "$INDEXED_REFL" ]; then
+            CURRENT_FILE_DIALS_SUCCESS=false
+            echo "Error: dials.index failed for $cbf_file_rel_path. Check log." >> "$LOG_SUMMARY"
+        fi
     fi
-
-    # 4. dials.refine
-    REFINEMENT_ARGS=("indexed.expt" "indexed.refl" "output.experiments=refined.expt" "output.reflections=refined.refl")
-    if [ -f "../$REFINEMENT_PHIL_FILE" ]; then REFINEMENT_ARGS+=("../$REFINEMENT_PHIL_FILE"); fi
     
-    # Phase 0, T0.5: parameterisation.crystal.fix=cell and use external PDB as reference_geometry
-    if [ -n "$EXTERNAL_PDB_PATH" ]; then
-        REFINEMENT_ARGS+=("refinement.parameterisation.crystal.fix=cell" "refinement.reference_model.enabled=True" "refinement.reference_model.file=../$EXTERNAL_PDB_PATH")
-    fi
-
-    if $DIALS_SUCCESS; then
+    # 4. dials.refine
+    if $CURRENT_FILE_DIALS_SUCCESS; then
         echo "Step 4: Running dials.refine..."
-        dials.refine "${REFINEMENT_ARGS[@]}" > dials.refine.log 2>&1
-        if [ $? -ne 0 ] || [ ! -f refined.expt ] || [ ! -f refined.refl ]; then DIALS_SUCCESS=false; echo "Error: dials.refine failed. See $work_dir/dials.refine.log" >> "$LOG_SUMMARY"; fi
+        REFINE_COMMAND_ARGS=("$INDEXED_EXPT" "$INDEXED_REFL")
+        # CRITICAL: Ensure unit cell is fixed. This overrides PHIL if PHIL tries to unfix it.
+        REFINE_COMMAND_ARGS+=("refinement.parameterisation.crystal.fix=cell")
+        if [ -f "$ROOT_DIR/$REFINEMENT_PHIL_FILE" ]; then
+            REFINE_COMMAND_ARGS+=("$ROOT_DIR/$REFINEMENT_PHIL_FILE")
+        else
+            echo "Warning: Refinement PHIL file $ROOT_DIR/$REFINEMENT_PHIL_FILE not found. Running refine with minimal command line args." >> "$LOG_SUMMARY"
+            # Add essential refinement parameters if PHIL is missing, e.g., for outlier rejection
+            # REFINE_COMMAND_ARGS+=("refinement.reflections.outlier.algorithm=tukey")
+        fi
+        REFINE_COMMAND_ARGS+=("output.experiments=$REFINED_EXPT" "output.reflections=$REFINED_REFL")
+
+        dials.refine "${REFINE_COMMAND_ARGS[@]}" > dials.refine.log 2>&1
+        if [ $? -ne 0 ] || [ ! -s "$REFINED_EXPT" ] || [ ! -s "$REFINED_REFL" ]; then
+            CURRENT_FILE_DIALS_SUCCESS=false
+            echo "Error: dials.refine failed for $cbf_file_rel_path. Check log." >> "$LOG_SUMMARY"
+        fi
     fi
 
-    # T0.7: dials.generate_mask (Bragg mask)
-    if $DIALS_SUCCESS; then
+    # 5. dials.generate_mask (using the final refined files)
+    if $CURRENT_FILE_DIALS_SUCCESS; then
         echo "Step 5: Running dials.generate_mask..."
-        # Tune parameters here as needed, e.g. border=0, d_min= (high res limit for spots to mask)
-        dials.generate_mask experiments=refined.expt reflections=refined.refl output.mask=bragg_mask.pickle > dials.generate_mask.log 2>&1
-        if [ $? -ne 0 ] || [ ! -f bragg_mask.pickle ]; then 
-            echo "Error: dials.generate_mask failed or bragg_mask.pickle not created. Check $work_dir/dials.generate_mask.log" >> "$LOG_SUMMARY"
-            DIALS_SUCCESS=false # Mark as failure as mask is crucial
-        else
-            echo "dials.generate_mask successful: bragg_mask.pickle" >> "$LOG_SUMMARY"
+        dials.generate_mask experiments="$REFINED_EXPT" reflections="$REFINED_REFL" output.mask="$BRAGG_MASK" > dials.generate_mask.log 2>&1
+        if [ $? -ne 0 ] || [ ! -s "$BRAGG_MASK" ]; then
+            CURRENT_FILE_DIALS_SUCCESS=false # Mask is crucial
+            echo "Error: dials.generate_mask failed for $cbf_file_rel_path. Check log." >> "$LOG_SUMMARY"
         fi
     fi
+    # === END OF DIALS STEPS ===
 
-    # --- POST-DIALS PYTHON SCRIPT STEPS ---
-    if $DIALS_SUCCESS && [ -f refined.expt ] && [ -f refined.refl ]; then
-        echo "DIALS core processing successful. Proceeding with Python analysis scripts..."
+    if $CURRENT_FILE_DIALS_SUCCESS; then
+        echo "DIALS core processing successful for $cbf_file_rel_path. Proceeding with Python scripts..." | tee -a "$LOG_SUMMARY"
 
-        # Check for bragg_mask.pickle for extract_dials_data_for_eryx.py
-        EXTRACTION_ARGS=("--experiment_file" "refined.expt" "--image_files" "../$cbf_file" "--output_npz_file" "${base_name}_diffuse_data.npz")
-        if [ -f bragg_mask.pickle ]; then
-            EXTRACTION_ARGS+=("--bragg_mask_file" "bragg_mask.pickle")
-        else
-            echo "Warning: bragg_mask.pickle not found. extract_dials_data_for_eryx.py might require it or run with default behavior." >> "$LOG_SUMMARY"
-        fi
-        if [ -n "$EXTERNAL_PDB_PATH" ]; then
-             EXTRACTION_ARGS+=("--external_pdb_file" "../$EXTERNAL_PDB_PATH")
-        fi
-
-        # Add new extraction parameters conditionally
+        # --- POST-DIALS PYTHON SCRIPT STEPS ---
+        EXTRACTION_ARGS=("--experiment_file" "$(pwd)/$REFINED_EXPT" \
+                         "--image_files" "$cbf_file_abs_path" \
+                         "--bragg_mask_file" "$(pwd)/$BRAGG_MASK" \
+                         "--external_pdb_file" "$(realpath "$EXTERNAL_PDB_FOR_ERYX_CHECK")" \
+                         "--output_npz_file" "$(pwd)/${base_name}_diffuse_data.npz" \
+                         "--gain" "$EXTRACT_GAIN" \
+                         "--cell_length_tol" "$EXTRACT_CELL_LENGTH_TOL" \
+                         "--cell_angle_tol" "$EXTRACT_CELL_ANGLE_TOL" \
+                         "--orient_tolerance_deg" "$EXTRACT_ORIENT_TOL_DEG" \
+                         "--pixel_step" "$EXTRACT_PIXEL_STEP")
         if [ -n "$EXTRACT_MIN_RES" ]; then EXTRACTION_ARGS+=("--min_res" "$EXTRACT_MIN_RES"); fi
         if [ -n "$EXTRACT_MAX_RES" ]; then EXTRACTION_ARGS+=("--max_res" "$EXTRACT_MAX_RES"); fi
         if [ -n "$EXTRACT_MIN_INTENSITY" ]; then EXTRACTION_ARGS+=("--min_intensity" "$EXTRACT_MIN_INTENSITY"); fi
         if [ -n "$EXTRACT_MAX_INTENSITY" ]; then EXTRACTION_ARGS+=("--max_intensity" "$EXTRACT_MAX_INTENSITY"); fi
-        EXTRACTION_ARGS+=("--gain" "$EXTRACT_GAIN")
-        EXTRACTION_ARGS+=("--cell_length_tol" "$EXTRACT_CELL_LENGTH_TOL")
-        EXTRACTION_ARGS+=("--cell_angle_tol" "$EXTRACT_CELL_ANGLE_TOL")
-        EXTRACTION_ARGS+=("--orient_tolerance_deg" "$EXTRACT_ORIENT_TOL_DEG")
-        
-        echo "Running extract_dials_data_for_eryx.py (for diffuse data)..."
+        if [ "$EXTRACT_LP_CORRECTION_ENABLED" = true ]; then EXTRACTION_ARGS+=("--lp_correction_enabled"); fi
+        if [ -n "$EXTRACT_SUBTRACT_BACKGROUND_VALUE" ]; then EXTRACTION_ARGS+=("--subtract_background_value" "$EXTRACT_SUBTRACT_BACKGROUND_VALUE"); fi
+        if [ "$EXTRACT_PLOT" = true ]; then EXTRACTION_ARGS+=("--plot"); fi
+        if [ "$EXTRACT_VERBOSE_PYTHON" = true ]; then EXTRACTION_ARGS+=("--verbose"); fi
+        # Default to pixel mode for eryx diffuse data
+        EXTRACTION_ARGS+=("--data-source" "pixels")
+
+
+        echo "Running extract_dials_data_for_eryx.py..."
         python "$ROOT_DIR/extract_dials_data_for_eryx.py" "${EXTRACTION_ARGS[@]}" > extract_diffuse_data.log 2>&1
         EXTRACTION_EXIT_CODE=$?
-        if [ $EXTRACTION_EXIT_CODE -ne 0 ]; then 
-            echo "Error: extract_dials_data_for_eryx.py (diffuse) failed with exit code $EXTRACTION_EXIT_CODE. See log." >> "$LOG_SUMMARY"
-            DIALS_SUCCESS=false # Consider this a failure of the main eryx prep path
-        else 
-            echo "extract_dials_data_for_eryx.py (diffuse) successful." >> "$LOG_SUMMARY"
-        fi
-        
-        if [ "$RUN_DIAGNOSTICS" = true ] && $DIALS_SUCCESS; then # Only run diagnostics if main extraction succeeded
-            echo "Running diagnostic scripts..."
-            # Q-map generation (calculate_q_per_pixel.py)
-            echo "Running calculate_q_per_pixel.py..."
-            python "$ROOT_DIR/calculate_q_per_pixel.py" --expt refined.expt --output_prefix "${base_name}" > calculate_q_per_pixel.log 2>&1
-            if [ $? -ne 0 ]; then echo "calculate_q_per_pixel.py failed. See log." >> "$LOG_SUMMARY"; else echo "calculate_q_per_pixel.py successful." >> "$LOG_SUMMARY"; fi
-
-            # Q-vector consistency check (check_q_vector_consistency.py)
-            echo "Running check_q_vector_consistency.py..."
-            python "$ROOT_DIR/check_q_vector_consistency.py" --expt refined.expt --refl refined.refl > check_q_consistency.log 2>&1
-            if [ $? -ne 0 ]; then echo "check_q_vector_consistency.py failed. See log." >> "$LOG_SUMMARY"; else echo "check_q_vector_consistency.py successful." >> "$LOG_SUMMARY"; fi
+        if [ $EXTRACTION_EXIT_CODE -ne 0 ]; then
+            echo "Error: extract_dials_data_for_eryx.py failed for $cbf_file_rel_path with exit code $EXTRACTION_EXIT_CODE. See log in $(pwd)" >> "$LOG_SUMMARY"
+            FAILED_EXTRACTION_STEPS=$((FAILED_EXTRACTION_STEPS + 1))
         else
-            echo "Skipping diagnostic scripts (RUN_DIAGNOSTICS is not true)." >> "$LOG_SUMMARY"
+            echo "extract_dials_data_for_eryx.py successful for $cbf_file_rel_path." >> "$LOG_SUMMARY"
         fi
 
+        if [ "$RUN_DIAGNOSTICS" = true ]; then
+            echo "Running diagnostic scripts for $cbf_file_rel_path..."
+            # check_q_vector_consistency.py uses refined.expt and refined.refl
+            python "$ROOT_DIR/check_q_vector_consistency.py" --expt "$(pwd)/$REFINED_EXPT" --refl "$(pwd)/$REFINED_REFL" > check_q_consistency.log 2>&1
+            if [ $? -ne 0 ]; then echo "Warning: check_q_vector_consistency.py failed for $cbf_file_rel_path." >> "$LOG_SUMMARY"; fi
+            
+            # calculate_q_per_pixel.py uses refined.expt
+            python "$ROOT_DIR/calculate_q_per_pixel.py" --expt "$(pwd)/$REFINED_EXPT" --output_prefix "${base_name}" > calculate_q_per_pixel.log 2>&1
+            if [ $? -ne 0 ]; then echo "Warning: calculate_q_per_pixel.py failed for $cbf_file_rel_path." >> "$LOG_SUMMARY"; fi
+        fi
     else
-        echo "DIALS core processing failed or essential files missing. Skipping Python analysis scripts." >> "$LOG_SUMMARY"
-        if $DIALS_SUCCESS; then FAILED_COUNT=$((FAILED_COUNT + 1)); fi # If DIALS_SUCCESS true but files missing
+        echo "DIALS core processing failed for $cbf_file_rel_path. Skipping Python scripts." >> "$LOG_SUMMARY"
+        FAILED_DIALS_STEPS=$((FAILED_DIALS_STEPS + 1))
     fi
     
-    if ! $DIALS_SUCCESS; then FAILED_COUNT=$((FAILED_COUNT+1)); fi
-    cd "$ROOT_DIR"
-    echo "Finished processing $cbf_file."
+    popd > /dev/null # Return to ROOT_DIR
+    echo "Finished processing $cbf_file_rel_path."
     echo ""
 done
 
 END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
-echo "---------------------------------------------------------------------"
-echo "DIALS Processing Complete."
-echo "Total CBF files attempted: $PROCESSED_COUNT"
-echo "Failed DIALS steps or skipped Python analysis: $FAILED_COUNT"
-# A more nuanced success count could be added here based on log grepping
-TOTAL_FULLY_SUCCESSFUL=$(grep -c "extract_dials_data_for_eryx.py (diffuse) successful." "$LOG_SUMMARY")
-echo "Fully successful (DIALS + diffuse extraction): $TOTAL_FULLY_SUCCESSFUL"
+TOTAL_FULLY_SUCCESSFUL=$(grep -c "extract_dials_data_for_eryx.py successful for" "$LOG_SUMMARY") # More specific grep
 
+echo "---------------------------------------------------------------------"
+echo "DIALS & Extraction Processing Complete."
+echo "Total CBF files attempted: $PROCESSED_COUNT"
+echo "Failed DIALS steps (preventing extraction): $FAILED_DIALS_STEPS"
+echo "Failed Extraction steps (after successful DIALS): $FAILED_EXTRACTION_STEPS"
+echo "Fully successful (DIALS + diffuse extraction): $TOTAL_FULLY_SUCCESSFUL"
 echo "Total processing time: $DURATION seconds."
 echo "Summary log created: $LOG_SUMMARY"
 
 echo "-------------------------------------" >> "$LOG_SUMMARY"
 echo "Total CBF files attempted: $PROCESSED_COUNT" >> "$LOG_SUMMARY"
-echo "Failed DIALS steps or skipped Python analysis: $FAILED_COUNT" >> "$LOG_SUMMARY"
+echo "Failed DIALS steps: $FAILED_DIALS_STEPS" >> "$LOG_SUMMARY"
+echo "Failed Extraction steps: $FAILED_EXTRACTION_STEPS" >> "$LOG_SUMMARY"
 echo "Fully successful (DIALS + diffuse extraction): $TOTAL_FULLY_SUCCESSFUL" >> "$LOG_SUMMARY"
 echo "Total processing time: $DURATION seconds." >> "$LOG_SUMMARY"
