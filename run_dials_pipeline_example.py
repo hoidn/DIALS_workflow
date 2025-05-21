@@ -231,19 +231,49 @@ def main():
         if not overall_success or not os.path.exists(os.path.join(abs_work_dir, final_refined_expt_name)):
             logger.error(f"dials.refine failed or {final_refined_expt_name} not created."); raise RuntimeError("DIALS Refine failed")
             
-        # Step 5: dials.generate_mask
-        logger.info("--- Step 5: dials.generate_mask ---")
-        mask_cmd = [
-            "dials.generate_mask", final_refined_expt_name, f"reflections={final_refined_refl_name}",
-            "output.mask=bragg_mask.pickle"
-            # Add parameters for mask generation if needed, e.g., border, d_min
-        ]
-        if args.mask_generation_phil_file and os.path.exists(os.path.join(orig_dir, args.mask_generation_phil_file)):
-            mask_cmd.append(os.path.abspath(os.path.join(orig_dir, args.mask_generation_phil_file)))
+        # Step 5: Generate a DUMMY "all False" Bragg mask for TESTING
+        logger.info("--- Step 5: Generating DUMMY 'all False' Bragg mask for TESTING ---")
+        try:
+            # We need the detector geometry to create a mask of the correct dimensions
+            from dxtbx.model.experiment_list import ExperimentListFactory
+            from dials.array_family import flex
+            import pickle
 
-        overall_success, _ = run_command(mask_cmd, "dials.generate_mask.log", work_dir=abs_work_dir)
-        if not overall_success or not os.path.exists(os.path.join(abs_work_dir, "bragg_mask.pickle")):
-            logger.error("dials.generate_mask failed or bragg_mask.pickle not created."); raise RuntimeError("DIALS Generate Mask failed")
+            logger.info(f"Creating dummy mask based on detector in {final_refined_expt_name}")
+            temp_experiments = ExperimentListFactory.from_json_file(
+                os.path.join(abs_work_dir, final_refined_expt_name), 
+                check_format=False
+            )
+            if not temp_experiments:
+                raise RuntimeError(f"Could not load {final_refined_expt_name} to get detector dimensions for dummy mask.")
+            
+            detector_for_mask = temp_experiments[0].detector
+            dummy_mask_list = []
+            for panel in detector_for_mask:
+                height, width = panel.get_image_size()
+                # Create a flex.bool array of all False
+                panel_mask = flex.bool(flex.grid(height, width), False)
+                dummy_mask_list.append(panel_mask)
+            
+            mask_file_path = os.path.join(abs_work_dir, "bragg_mask.pickle")
+            with open(mask_file_path, 'wb') as f_dummy_mask:
+                pickle.dump(dummy_mask_list, f_dummy_mask)
+            
+            logger.info(f"Dummy 'all False' mask created at {mask_file_path}")
+            logger.info(f"  DEBUG: Dummy mask panel 0: shape={dummy_mask_list[0].as_numpy_array().shape}, "
+                        f"Num Masked (True): {np.sum(dummy_mask_list[0].as_numpy_array())}, "
+                        f"Num Unmasked (False): {np.sum(~dummy_mask_list[0].as_numpy_array())}")
+            # success_mask remains True (or set it explicitly)
+            overall_success = True # Assuming dummy mask creation is successful
+
+        except Exception as e_dummy_mask:
+            logger.error(f"Failed to create dummy 'all False' mask: {e_dummy_mask}")
+            overall_success = False # Mark overall success as False
+
+        # Check if file was actually written
+        if not os.path.exists(os.path.join(abs_work_dir, "bragg_mask.pickle")) and overall_success:
+            logger.error("bragg_mask.pickle not created even after dummy mask attempt.")
+            overall_success = False
             
         # --- Post-DIALS Python Script Steps ---
         if args.skip_post_processing:
