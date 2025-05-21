@@ -70,7 +70,7 @@ def parse_args():
     # DIALS PHIL files
     parser.add_argument("--find_spots_phil", help="PHIL file for dials.find_spots.", default="./find_spots.phil")
     parser.add_argument("--indexing_phil_file", help="Additional PHIL file for dials.index.", default=None)
-    parser.add_argument("--refinement_phil_file", help="Additional PHIL file for dials.refine.", default=None)
+    parser.add_argument("--refinement_phil_file", help="Additional PHIL file for dials.refine.", default="./refine_detector.phil")
     parser.add_argument("--mask_generation_phil_file", help="Additional PHIL file for dials.generate_mask.", default=None)
 
     # DIALS parameters
@@ -103,6 +103,35 @@ def main():
         logger.error(f"External PDB file not found: {abs_external_pdb}"); return 1
     if not os.path.exists(abs_find_spots_phil):
         logger.error(f"Find spots PHIL file not found: {abs_find_spots_phil}"); return 1
+        
+    # Parse PDB to extract unit cell and space group
+    pdb_unit_cell_str = None
+    pdb_space_group_str = None
+    overall_success = True
+    
+    try:
+        from iotbx.pdb import input as pdb_input_loader
+        from cctbx import uctbx
+
+        logger.info(f"Parsing external PDB for cell/SG: {abs_external_pdb}")
+        pdb_io = pdb_input_loader(file_name=abs_external_pdb)
+        crystal_symmetry_from_pdb = pdb_io.crystal_symmetry()
+        if crystal_symmetry_from_pdb and crystal_symmetry_from_pdb.unit_cell() and crystal_symmetry_from_pdb.space_group_info():
+            pdb_unit_cell_str = ",".join(map(str, crystal_symmetry_from_pdb.unit_cell().parameters()))
+            pdb_space_group_str = crystal_symmetry_from_pdb.space_group_info().type().lookup_symbol().replace(" ","")
+            logger.info(f"  Extracted Unit Cell: {pdb_unit_cell_str}")
+            logger.info(f"  Extracted Space Group: {pdb_space_group_str}")
+        else:
+            logger.error(f"Could not extract valid crystal symmetry (cell/SG) from PDB: {abs_external_pdb}")
+            overall_success = False
+    except Exception as e:
+        logger.error(f"Error parsing external PDB {abs_external_pdb} for cell/SG: {e}")
+        overall_success = False
+        
+    # Check success before proceeding
+    if not overall_success:
+        logger.error("Exiting due to PDB parsing failure.")
+        return 1
 
     # Setup output directory (relative to orig_dir if args.output_dir is relative)
     base_name = os.path.basename(args.cbf_file).rsplit('.', 1)[0]
@@ -149,46 +178,58 @@ def main():
 
         # Step 3: dials.index (Direct call)
         logger.info("--- Step 3: dials.index ---")
+        
+        # Define output names for this step, matching the "old working" script
+        current_indexed_expt_name = "indexed_initial.expt"
+        current_indexed_refl_name = "indexed_initial.refl"
+        
         index_cmd = [
             "dials.index", "imported.expt", "strong.refl",
-            f"indexing.known_symmetry.model={abs_external_pdb}",
-            "indexing.reference_model.enabled=True",
-            f"indexing.reference_model.file={abs_external_pdb}",
-            # Add other common/useful indexing parameters for stills referenced by PDB
+            f"indexing.known_symmetry.unit_cell={pdb_unit_cell_str}",
+            f"indexing.known_symmetry.space_group={pdb_space_group_str}",
+            # Add other common/useful indexing parameters for stills
             "indexing.stills.indexer=stills", # Ensure stills indexer is used
-            "indexing.refinement_protocol.d_min_start=2.0", # Sensible default
-            # "indexing.max_cell=XYZ", # If needed, from external_pdb or a bit larger
-            # "indexing.stills.rmsd_min_px=2.0" # Example
-            "output.experiments=indexed.expt",
-            "output.reflections=indexed.refl"
+            f"output.experiments={current_indexed_expt_name}",
+            f"output.reflections={current_indexed_refl_name}"
         ]
+        
         if args.indexing_phil_file and os.path.exists(os.path.join(orig_dir, args.indexing_phil_file)):
             index_cmd.append(os.path.abspath(os.path.join(orig_dir, args.indexing_phil_file)))
         
         overall_success, _ = run_command(index_cmd, "dials.index.log", work_dir=abs_work_dir)
-        if not overall_success or not os.path.exists(os.path.join(abs_work_dir, "indexed.expt")):
-            logger.error("dials.index failed or indexed.expt not created."); raise RuntimeError("DIALS Index failed")
+        if not overall_success or not os.path.exists(os.path.join(abs_work_dir, current_indexed_expt_name)):
+            logger.error(f"dials.index failed or {current_indexed_expt_name} not created."); raise RuntimeError("DIALS Index failed")
             
         # Step 4: dials.refine
         logger.info("--- Step 4: dials.refine ---")
+        
+        # Define output names for this step, matching the "old working" script
+        final_refined_expt_name = "indexed_refined_detector.expt"
+        final_refined_refl_name = "indexed_refined_detector.refl"
+        
         refine_cmd = [
-            "dials.refine", "indexed.expt", "indexed.refl",
-            "output.experiments=refined.expt", "output.reflections=refined.refl",
-            "refinement.parameterisation.crystal.fix=cell", # Crucial
-            "refinement.reference_model.enabled=True",
-            f"refinement.reference_model.file={abs_external_pdb}"
+            "dials.refine", current_indexed_expt_name, current_indexed_refl_name,
+            f"output.experiments={final_refined_expt_name}", 
+            f"output.reflections={final_refined_refl_name}"
         ]
+        
+        # Add the refinement PHIL file
         if args.refinement_phil_file and os.path.exists(os.path.join(orig_dir, args.refinement_phil_file)):
-            refine_cmd.append(os.path.abspath(os.path.join(orig_dir, args.refinement_phil_file)))
+            abs_refinement_phil = os.path.abspath(os.path.join(orig_dir, args.refinement_phil_file))
+            refine_cmd.append(abs_refinement_phil)
+            logger.info(f"Using refinement PHIL: {abs_refinement_phil}")
+        else:
+            logger.warning(f"Refinement PHIL file not specified or not found. Adding 'refinement.parameterisation.crystal.fix=cell' manually.")
+            refine_cmd.append("refinement.parameterisation.crystal.fix=cell")
 
         overall_success, _ = run_command(refine_cmd, "dials.refine.log", work_dir=abs_work_dir)
-        if not overall_success or not os.path.exists(os.path.join(abs_work_dir, "refined.expt")):
-            logger.error("dials.refine failed or refined.expt not created."); raise RuntimeError("DIALS Refine failed")
+        if not overall_success or not os.path.exists(os.path.join(abs_work_dir, final_refined_expt_name)):
+            logger.error(f"dials.refine failed or {final_refined_expt_name} not created."); raise RuntimeError("DIALS Refine failed")
             
         # Step 5: dials.generate_mask
         logger.info("--- Step 5: dials.generate_mask ---")
         mask_cmd = [
-            "dials.generate_mask", "experiments=refined.expt", "reflections=refined.refl",
+            "dials.generate_mask", f"experiments={final_refined_expt_name}", f"reflections={final_refined_refl_name}",
             "output.mask=bragg_mask.pickle"
             # Add parameters for mask generation if needed, e.g., border, d_min
         ]
@@ -210,7 +251,7 @@ def main():
             # Paths to original inputs (CBF, PDB) should be absolute
             extract_cmd = [
                 "python", os.path.abspath(os.path.join(orig_dir, "extract_dials_data_for_eryx.py")),
-                "--experiment_file", os.path.join(abs_work_dir, "refined.expt"),
+                "--experiment_file", os.path.join(abs_work_dir, final_refined_expt_name),
                 "--image_files", abs_cbf_file, # Original CBF path
                 "--bragg_mask_file", os.path.join(abs_work_dir, "bragg_mask.pickle"),
                 "--external_pdb_file", abs_external_pdb, # Original external PDB path
@@ -239,7 +280,7 @@ def main():
                 logger.info("--- Step 7: calculate_q_per_pixel.py (Diagnostic) ---")
                 q_map_cmd = [
                     "python", os.path.abspath(os.path.join(orig_dir, "calculate_q_per_pixel.py")),
-                    "--expt", os.path.join(abs_work_dir, "refined.expt"), # Corrected path
+                    "--expt", os.path.join(abs_work_dir, final_refined_expt_name), # Corrected path
                     "--output_prefix", base_name # Will be created in abs_work_dir
                 ]
                 # This script might need adaptation if it assumes current dir for output
@@ -249,8 +290,8 @@ def main():
                 logger.info("--- Step 8: check_q_vector_consistency.py (Diagnostic) ---")
                 q_check_cmd = [
                     "python", os.path.abspath(os.path.join(orig_dir, "check_q_vector_consistency.py")),
-                    "--expt", os.path.join(abs_work_dir, "refined.expt"), # Corrected path
-                    "--refl", os.path.join(abs_work_dir, "refined.refl")  # Corrected path
+                    "--expt", os.path.join(abs_work_dir, final_refined_expt_name), # Corrected path
+                    "--refl", os.path.join(abs_work_dir, final_refined_refl_name)  # Corrected path
                 ]
                 # This script might save plots in current dir (abs_work_dir)
                 overall_success, _ = run_command(q_check_cmd, "check_q_consistency.log", work_dir=abs_work_dir)
