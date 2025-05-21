@@ -229,7 +229,7 @@ def main():
         # Step 5: dials.generate_mask
         logger.info("--- Step 5: dials.generate_mask ---")
         mask_cmd = [
-            "dials.generate_mask", f"experiments={final_refined_expt_name}", f"reflections={final_refined_refl_name}",
+            "dials.generate_mask", final_refined_expt_name, f"reflections={final_refined_refl_name}",
             "output.mask=bragg_mask.pickle"
             # Add parameters for mask generation if needed, e.g., border, d_min
         ]
