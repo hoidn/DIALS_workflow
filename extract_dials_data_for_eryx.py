@@ -281,26 +281,39 @@ def main():
                 for panel_idx, panel in enumerate(detector):
                     panel_data_flex = raw_data_tup[panel_idx]          # flex array straight from DIALS
                     panel_data_np = panel_data_flex.as_numpy_array()   # NumPy copy for later arithmetic
-                    panel_bragg_mask = bragg_mask_tuple[panel_idx].as_numpy_array()
+                    panel_bragg_mask_loaded = bragg_mask_tuple[panel_idx].as_numpy_array()
                     panel_trusted_mask = panel.get_trusted_range_mask(panel_data_flex).as_numpy_array()
                     
-                    # Get dimensions from detector model and verify all arrays have consistent dimensions
-                    ss, fs = panel.get_image_size()  # Slow, Fast from detector model (note: returns fast, slow)
+                    # Get dimensions from detector model
+                    # panel.get_image_size() returns (fast, slow) but NumPy arrays are (slow, fast)
+                    fs_detector, ss_detector = panel.get_image_size()  # Fast, Slow from detector model
+                    expected_np_shape = (ss_detector, fs_detector)  # Expected NumPy shape (slow, fast)
+                    
+                    # Check if Bragg mask needs transposing (common issue with flex->numpy conversion)
+                    panel_bragg_mask = panel_bragg_mask_loaded
+                    if panel_bragg_mask_loaded.shape == (fs_detector, ss_detector):  # If it's (fast, slow)
+                        logger.info(f"Panel {panel_idx}: Bragg mask dimensions appear transposed {panel_bragg_mask_loaded.shape}. Transposing to {expected_np_shape}.")
+                        panel_bragg_mask = panel_bragg_mask_loaded.transpose()
+                    
+                    # Get dimensions of all arrays after potential transposing
                     ss_data, fs_data = panel_data_np.shape  # Dimensions from actual data array
-                    ss_bragg_mask, fs_bragg_mask = panel_bragg_mask.shape
+                    ss_bragg_mask, fs_bragg_mask = panel_bragg_mask.shape  # After potential transpose
                     ss_trusted_mask, fs_trusted_mask = panel_trusted_mask.shape
                     
                     if args.verbose:
-                        logger.info(f"Panel {panel_idx} DIMS: DetectorModel(ss,fs)=({ss},{fs}), "
-                                    f"ImageData(ss,fs)=({ss_data},{fs_data}), "
-                                    f"BraggMask(ss,fs)=({ss_bragg_mask},{fs_bragg_mask}), "
-                                    f"TrustedMask(ss,fs)=({ss_trusted_mask},{fs_trusted_mask})")
+                        logger.info(f"Panel {panel_idx} DIMS (NumPy convention: slow,fast): "
+                                    f"DetectorModel(s,f)=({ss_detector},{fs_detector}), "
+                                    f"ImageData(s,f)=({ss_data},{fs_data}), "
+                                    f"BraggMask(s,f)=({ss_bragg_mask},{fs_bragg_mask}), "
+                                    f"TrustedMask(s,f)=({ss_trusted_mask},{fs_trusted_mask})")
                     
                     # Check for dimension mismatches and handle appropriately
-                    if (ss_data, fs_data) != (ss, fs) or (ss_bragg_mask, fs_bragg_mask) != (ss, fs) or (ss_trusted_mask, fs_trusted_mask) != (ss, fs):
-                        logger.error(f"CRITICAL DIMENSION MISMATCH for Panel {panel_idx}!")
-                        logger.error(f"  Expected from detector model: ({ss}, {fs})")
-                        logger.error(f"  Got: ImageData({ss_data}, {fs_data}), BraggMask({ss_bragg_mask}, {fs_bragg_mask}), TrustedMask({ss_trusted_mask}, {fs_trusted_mask})")
+                    if panel_data_np.shape != expected_np_shape or \
+                       panel_bragg_mask.shape != expected_np_shape or \
+                       panel_trusted_mask.shape != expected_np_shape:
+                        logger.error(f"CRITICAL DIMENSION MISMATCH for Panel {panel_idx} after adjustments!")
+                        logger.error(f"  Expected NumPy shape (slow,fast): {expected_np_shape}")
+                        logger.error(f"  Got: ImageData{panel_data_np.shape}, BraggMask{panel_bragg_mask.shape}, TrustedMask{panel_trusted_mask.shape}")
                         logger.error(f"  Skipping panel {panel_idx} due to dimension mismatch")
                         continue  # Skip this panel
                     
@@ -319,8 +332,8 @@ def main():
                         logger.info(f"  Max intensity filter: {args.max_intensity}")
                         logger.info(f"  Background subtraction: {args.subtract_background_value}")
                     
-                    for sl_idx in range(0,ss,args.pixel_step):
-                        for ft_idx in range(0,fs,args.pixel_step):
+                    for sl_idx in range(0,ss_detector,args.pixel_step):
+                        for ft_idx in range(0,fs_detector,args.pixel_step):
                             pbar.update(1)
                             panel_total_pixels += 1
                             
