@@ -36,6 +36,8 @@ def run_command(cmd, log_file=None, work_dir=None):
     logger.info(f"Running command: {' '.join(cmd)}")
     logger.info(f"In working directory: {work_dir if work_dir else os.getcwd()}")
 
+    stdout_capture = None
+    
     if log_file:
         # Ensure log_file path is absolute or relative to the intended directory
         log_path = os.path.join(work_dir, log_file) if work_dir and not os.path.isabs(log_file) else log_file
@@ -43,6 +45,7 @@ def run_command(cmd, log_file=None, work_dir=None):
             process = subprocess.run(cmd, text=True, stdout=f, stderr=subprocess.STDOUT, cwd=work_dir)
     else:
         process = subprocess.run(cmd, text=True, capture_output=True, cwd=work_dir)
+        stdout_capture = process.stdout
 
     if process.returncode != 0:
         logger.error(f"Command failed with exit code {process.returncode}")
@@ -50,10 +53,10 @@ def run_command(cmd, log_file=None, work_dir=None):
             logger.error(f"Error output: {process.stdout}") # stdout contains merged output
         elif not log_file and process.stdout:
              logger.info(f"Output: {process.stdout}")
-        return False
+        return False, stdout_capture
     
     logger.info(f"Command successful: {' '.join(cmd[:2])}...")
-    return True
+    return True, stdout_capture
 
 def parse_args():
     parser = argparse.ArgumentParser(
