@@ -283,7 +283,28 @@ def main():
                     panel_data_np = panel_data_flex.as_numpy_array()   # NumPy copy for later arithmetic
                     panel_bragg_mask = bragg_mask_tuple[panel_idx].as_numpy_array()
                     panel_trusted_mask = panel.get_trusted_range_mask(panel_data_flex).as_numpy_array()
-                    fs, ss = panel.get_image_size(); f_coords,s_coords,p_i,p_v = [],[],[],[]
+                    
+                    # Get dimensions from detector model and verify all arrays have consistent dimensions
+                    ss, fs = panel.get_image_size()  # Slow, Fast from detector model (note: returns fast, slow)
+                    ss_data, fs_data = panel_data_np.shape  # Dimensions from actual data array
+                    ss_bragg_mask, fs_bragg_mask = panel_bragg_mask.shape
+                    ss_trusted_mask, fs_trusted_mask = panel_trusted_mask.shape
+                    
+                    if args.verbose:
+                        logger.info(f"Panel {panel_idx} DIMS: DetectorModel(ss,fs)=({ss},{fs}), "
+                                    f"ImageData(ss,fs)=({ss_data},{fs_data}), "
+                                    f"BraggMask(ss,fs)=({ss_bragg_mask},{fs_bragg_mask}), "
+                                    f"TrustedMask(ss,fs)=({ss_trusted_mask},{fs_trusted_mask})")
+                    
+                    # Check for dimension mismatches and handle appropriately
+                    if (ss_data, fs_data) != (ss, fs) or (ss_bragg_mask, fs_bragg_mask) != (ss, fs) or (ss_trusted_mask, fs_trusted_mask) != (ss, fs):
+                        logger.error(f"CRITICAL DIMENSION MISMATCH for Panel {panel_idx}!")
+                        logger.error(f"  Expected from detector model: ({ss}, {fs})")
+                        logger.error(f"  Got: ImageData({ss_data}, {fs_data}), BraggMask({ss_bragg_mask}, {fs_bragg_mask}), TrustedMask({ss_trusted_mask}, {fs_trusted_mask})")
+                        logger.error(f"  Skipping panel {panel_idx} due to dimension mismatch")
+                        continue  # Skip this panel
+                    
+                    f_coords,s_coords,p_i,p_v = [],[],[],[]
                     
                     # Panel-level counters for diagnostics
                     panel_total_pixels = 0
@@ -303,18 +324,32 @@ def main():
                             pbar.update(1)
                             panel_total_pixels += 1
                             
-                            # Check Bragg mask
-                            if panel_bragg_mask[sl_idx,ft_idx]:
-                                panel_rejected_by_bragg_mask += 1
-                                if args.verbose and panel_rejected_by_bragg_mask < 10:  # Log first few rejections
-                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by Bragg mask")
+                            # Check Bragg mask - use try/except to catch any index errors
+                            try:
+                                if panel_bragg_mask[sl_idx,ft_idx]:
+                                    panel_rejected_by_bragg_mask += 1
+                                    if args.verbose and panel_rejected_by_bragg_mask < 10:  # Log first few rejections
+                                        logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by Bragg mask")
+                                    continue
+                            except IndexError as e:
+                                logger.error(f"IndexError accessing Bragg mask at ({sl_idx},{ft_idx}): {e}")
+                                logger.error(f"  Panel {panel_idx} Bragg mask shape: {panel_bragg_mask.shape}")
+                                logger.error(f"  This should not happen if dimensions were verified. Skipping pixel.")
                                 continue
                             
-                            # Check trusted range
-                            if not panel_trusted_mask[sl_idx,ft_idx]:
-                                panel_rejected_by_trusted_range += 1
-                                if args.verbose and panel_rejected_by_trusted_range < 10:  # Log first few rejections
-                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by detector trusted range")
+                            # Check trusted range - use try/except to catch any index errors
+                            try:
+                                if not panel_trusted_mask[sl_idx,ft_idx]:
+                                    panel_rejected_by_trusted_range += 1
+                                    if args.verbose and panel_rejected_by_trusted_range < 10:  # Log first few rejections
+                                        logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by detector trusted range")
+                                        # Print the actual pixel value for debugging
+                                        logger.info(f"    Pixel value: {panel_data_np[sl_idx,ft_idx]}, Trusted range: {panel.get_trusted_range()}")
+                                    continue
+                            except IndexError as e:
+                                logger.error(f"IndexError accessing trusted mask at ({sl_idx},{ft_idx}): {e}")
+                                logger.error(f"  Panel {panel_idx} trusted mask shape: {panel_trusted_mask.shape}")
+                                logger.error(f"  This should not happen if dimensions were verified. Skipping pixel.")
                                 continue
                             
                             # Check intensity filters
