@@ -154,7 +154,11 @@ def check_pdb_consistency(experiments, ext_pdb_symm, len_tol, ang_tol, orient_to
             print(f"PDB Check Exp {i}:\n  Exp Cell: {exp_uc}\n  PDB Cell: {ext_uc}")
             
         # Cell similarity
-        if not exp_uc.is_similar_to(ext_uc, length_tolerance=len_tol, angle_tolerance_deg=ang_tol):
+        if not exp_uc.is_similar_to(
+            other=ext_uc, 
+            relative_length_tolerance=len_tol,
+            absolute_angle_tolerance=ang_tol
+        ):
             print(f"Warning Exp {i} CELL MISMATCH! Exp: {exp_uc} vs PDB: {ext_uc}")
             ok = False
             
