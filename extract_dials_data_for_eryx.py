@@ -282,9 +282,10 @@ def main():
             for frame_idx in range(len(imageset)):
                 raw_data_tup = imageset.get_raw_data(frame_idx)
                 for panel_idx, panel in enumerate(detector):
-                    panel_data_np = raw_data_tup[panel_idx].as_numpy_array()
+                    panel_data_flex = raw_data_tup[panel_idx]          # flex array straight from DIALS
+                    panel_data_np = panel_data_flex.as_numpy_array()   # NumPy copy for later arithmetic
                     panel_bragg_mask = bragg_mask_tuple[panel_idx].as_numpy_array()
-                    panel_trusted_mask = panel.get_trusted_range_mask(panel_data_np).as_numpy_array()
+                    panel_trusted_mask = panel.get_trusted_range_mask(panel_data_flex).as_numpy_array()
                     fs, ss = panel.get_image_size(); f_coords,s_coords,p_i,p_v = [],[],[],[]
                     for sl_idx in range(0,ss,args.pixel_step):
                         for ft_idx in range(0,fs,args.pixel_step):
