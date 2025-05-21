@@ -97,23 +97,29 @@ def load_external_pdb(pdb_file_path):
     except Exception as e: print(f"Error loading PDB {pdb_file_path}: {e}"); return None
 
 def calculate_misorientation(A1_matrix, A2_matrix):
-    """Calculates misorientation angle in degrees between two orientation matrices A1 and A2."""
-    # R = A2 * A1_inv
-    # Ensure inputs are scitbx.matrix.sqr objects
-    A1 = matrix.sqr(A1_matrix)
-    A2 = matrix.sqr(A2_matrix)
-    try:
-        A1_inv = A1.inverse()
-    except RuntimeError: # Singular matrix
-        return 180.0 # Max misorientation if inverse fails
-    R = A2 * A1_inv
-    trace_R = R.trace()
-    # Ensure trace_R is within valid range for acos [-1, 1]
-    # (trace(R) - 1) / 2 should be cos(angle)
-    cos_angle = (trace_R - 1.0) / 2.0
-    cos_angle_clipped = np.clip(cos_angle, -1.0, 1.0)
-    angle_rad = np.arccos(cos_angle_clipped)
-    return np.degrees(angle_rad)
+    """
+    Return the smallest rotation angle (deg) that aligns A1 to A2,
+    *after* also testing the centrosymmetric inversion (−I).
+    """
+    def angle(a, b):
+        A1 = matrix.sqr(a)
+        A2 = matrix.sqr(b)
+        try:
+            A1_inv = A1.inverse()
+        except RuntimeError: # Singular matrix
+            return 180.0 # Max misorientation if inverse fails
+        R = A2 * A1_inv
+        trace_R = R.trace()
+        # Ensure trace_R is within valid range for acos [-1, 1]
+        # (trace(R) - 1) / 2 should be cos(angle)
+        cos_angle = (trace_R - 1.0) / 2.0
+        cos_angle_clipped = np.clip(cos_angle, -1.0, 1.0)
+        angle_rad = np.arccos(cos_angle_clipped)
+        return np.degrees(angle_rad)
+
+    a = angle(A1_matrix, A2_matrix)
+    a_inv = angle(A1_matrix, [-x for x in A2_matrix])  # inverted hand
+    return min(a, a_inv)
 
 def check_pdb_consistency(experiments, ext_pdb_symm, len_tol, ang_tol, orient_tol_deg, verb):
     if not ext_pdb_symm: return True
@@ -262,7 +268,10 @@ def main():
         print("Pixel-centric mode")
         try:
             with open(args.bragg_mask_file, 'rb') as f: bragg_mask_tuple = pickle.load(f)
-            imagesets = ImageSetFactory.from_filenames(args.image_files)
+            try:  # DIALS ≤ 3.1
+                imagesets = ImageSetFactory.from_filenames(args.image_files)
+            except AttributeError:  # DIALS ≥ 3.2
+                imagesets = ImageSetFactory.new(args.image_files)
         except Exception as e: print(f"Error loading pixel data inputs: {e}"); sys.exit(1)
         if not imagesets: print("Error: No image sets loaded."); sys.exit(1)
 
