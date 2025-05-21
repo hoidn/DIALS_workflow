@@ -88,6 +88,7 @@ def parse_args():
 
     parser.add_argument("--skip_post_processing", action="store_true", help="Skip post-DIALS Python script steps (extraction, diagnostics).")
     parser.add_argument("--run_diagnostics", action="store_true", help="Run diagnostic Python scripts (q-map, consistency check).")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output for Python sub-scripts (like extract_dials_data_for_eryx.py).")
 
     return parser.parse_args()
 
@@ -290,7 +291,7 @@ def main():
             if EXTRACT_DEFAULTS["lp_correction_enabled"]: extract_cmd.append("--lp_correction_enabled")
             if EXTRACT_DEFAULTS["subtract_background_value"] is not None: extract_cmd.append(f"--subtract_background_value={EXTRACT_DEFAULTS['subtract_background_value']}")
             if EXTRACT_DEFAULTS["plot"]: extract_cmd.append("--plot")
-            if EXTRACT_DEFAULTS["verbose_extract"]: extract_cmd.append("--verbose")
+            if args.verbose or EXTRACT_DEFAULTS["verbose_extract"]: extract_cmd.append("--verbose")
             
             overall_success, _ = run_command(extract_cmd, "extract_diffuse_data.log", work_dir=abs_work_dir) # Log also in work_dir
             if not overall_success:
