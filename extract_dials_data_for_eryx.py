@@ -327,7 +327,7 @@ def main():
                     panel_rejected_by_max_intensity = 0
                     
                     if args.verbose:
-                        logger.info(f"Panel {panel_idx}: Processing {ss}x{fs} pixels with step {args.pixel_step}")
+                        logger.info(f"Panel {panel_idx}: Processing {ss_detector}x{fs_detector} pixels with step {args.pixel_step}")
                         logger.info(f"  Min intensity filter: {args.min_intensity}")
                         logger.info(f"  Max intensity filter: {args.max_intensity}")
                         logger.info(f"  Background subtraction: {args.subtract_background_value}")
