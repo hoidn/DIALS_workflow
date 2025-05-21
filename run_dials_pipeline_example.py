@@ -5,6 +5,10 @@ import sys
 import subprocess
 import argparse
 import logging
+import pickle
+import numpy as np
+from dxtbx.model.experiment_list import ExperimentListFactory
+from dials.array_family import flex
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("dials_pipeline_py")
