@@ -11,6 +11,7 @@ from iotbx.pdb import input as pdb_input
 from cctbx import uctbx, sgtbx 
 import matplotlib.pyplot as plt 
 import pickle 
+import logging
 
 from dxtbx.imageset import ImageSetFactory
 from dials.model.data import Shoebox 
@@ -18,6 +19,10 @@ from dials.algorithms.shoebox import MaskCode
 
 from scipy.constants import pi
 from tqdm import tqdm
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger("extract_dials")
 
 # --- Helper function from consistency.py or similar, for q_bragg calculation ---
 def hkl_to_lab_q(experiment, hkl_vec):
@@ -287,37 +292,143 @@ def main():
                     panel_bragg_mask = bragg_mask_tuple[panel_idx].as_numpy_array()
                     panel_trusted_mask = panel.get_trusted_range_mask(panel_data_flex).as_numpy_array()
                     fs, ss = panel.get_image_size(); f_coords,s_coords,p_i,p_v = [],[],[],[]
+                    
+                    # Panel-level counters for diagnostics
+                    panel_total_pixels = 0
+                    panel_rejected_by_bragg_mask = 0
+                    panel_rejected_by_trusted_range = 0
+                    panel_rejected_by_min_intensity = 0
+                    panel_rejected_by_max_intensity = 0
+                    
+                    if args.verbose:
+                        logger.info(f"Panel {panel_idx}: Processing {ss}x{fs} pixels with step {args.pixel_step}")
+                        logger.info(f"  Min intensity filter: {args.min_intensity}")
+                        logger.info(f"  Max intensity filter: {args.max_intensity}")
+                        logger.info(f"  Background subtraction: {args.subtract_background_value}")
+                    
                     for sl_idx in range(0,ss,args.pixel_step):
                         for ft_idx in range(0,fs,args.pixel_step):
                             pbar.update(1)
-                            if panel_bragg_mask[sl_idx,ft_idx] or not panel_trusted_mask[sl_idx,ft_idx]: continue
+                            panel_total_pixels += 1
                             
+                            # Check Bragg mask
+                            if panel_bragg_mask[sl_idx,ft_idx]:
+                                panel_rejected_by_bragg_mask += 1
+                                if args.verbose and panel_rejected_by_bragg_mask < 10:  # Log first few rejections
+                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by Bragg mask")
+                                continue
+                            
+                            # Check trusted range
+                            if not panel_trusted_mask[sl_idx,ft_idx]:
+                                panel_rejected_by_trusted_range += 1
+                                if args.verbose and panel_rejected_by_trusted_range < 10:  # Log first few rejections
+                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): REJECTED by detector trusted range")
+                                continue
+                            
+                            # Check intensity filters
                             intensity = panel_data_np[sl_idx,ft_idx]
+                            original_intensity = intensity
+                            
                             if args.subtract_background_value is not None:
                                 intensity -= args.subtract_background_value
                             
-                            if (args.min_intensity is not None and intensity < args.min_intensity) or \
-                               (args.max_intensity is not None and intensity > args.max_intensity): continue
+                            if args.min_intensity is not None and intensity < args.min_intensity:
+                                panel_rejected_by_min_intensity += 1
+                                if args.verbose and panel_rejected_by_min_intensity < 10:  # Log first few rejections
+                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): OrigI={original_intensity:.1f}, BGSubI={intensity:.1f}. REJECTED by min_intensity ({args.min_intensity})")
+                                continue
                             
+                            if args.max_intensity is not None and intensity > args.max_intensity:
+                                panel_rejected_by_max_intensity += 1
+                                if args.verbose and panel_rejected_by_max_intensity < 10:  # Log first few rejections
+                                    logger.info(f"  P({panel_idx},{sl_idx},{ft_idx}): OrigI={original_intensity:.1f}, BGSubI={intensity:.1f}. REJECTED by max_intensity ({args.max_intensity})")
+                                continue
+                            
+                            # Pixel passed all initial filters
                             f_coords.append(ft_idx); s_coords.append(sl_idx); p_i.append(intensity)
                             # Variance: if BG subtracted, var(I_obs - BG_const) = var(I_obs). If BG has variance, add var(BG).
                             # Assuming BG_const for now. If image is pre-subtracted, this variance is less accurate.
-                            p_v.append(panel_data_np[sl_idx,ft_idx] / args.gain if args.gain > 0 else panel_data_np[sl_idx,ft_idx])
+                            p_v.append(original_intensity / args.gain if args.gain > 0 else original_intensity)
 
-                    if not f_coords: continue
+                    # Log panel filter statistics
+                    if args.verbose:
+                        logger.info(f"Panel {panel_idx} filter statistics:")
+                        logger.info(f"  Total pixels processed: {panel_total_pixels}")
+                        logger.info(f"  Rejected by Bragg mask: {panel_rejected_by_bragg_mask} ({panel_rejected_by_bragg_mask/panel_total_pixels*100:.1f}%)")
+                        logger.info(f"  Rejected by trusted range: {panel_rejected_by_trusted_range} ({panel_rejected_by_trusted_range/panel_total_pixels*100:.1f}%)")
+                        logger.info(f"  Rejected by min intensity: {panel_rejected_by_min_intensity} ({panel_rejected_by_min_intensity/panel_total_pixels*100:.1f}%)")
+                        logger.info(f"  Rejected by max intensity: {panel_rejected_by_max_intensity} ({panel_rejected_by_max_intensity/panel_total_pixels*100:.1f}%)")
+                        logger.info(f"  Candidates after initial filters: {len(f_coords)}")
+                    
+                    if not f_coords: 
+                        if args.verbose:
+                            logger.info(f"Panel {panel_idx}: No candidate pixels after initial filters.")
+                        continue
+                        
                     q_batch = calculate_q_for_pixel_batch(beam, panel, f_coords, s_coords)
                     accepted_idx = np.full(len(q_batch), True)
+                    
+                    # Resolution filter statistics
+                    num_before_res_filter = len(q_batch)
+                    num_rejected_by_res_filter = 0
+                    
                     if args.min_res is not None or args.max_res is not None:
                         d_spacings = np.array([q_to_resolution(q) for q in q_batch])
-                        if args.min_res: accepted_idx &= (d_spacings <= args.min_res)
-                        if args.max_res: accepted_idx &= (d_spacings >= args.max_res)
+                        
+                        if args.verbose:
+                            logger.info(f"  Resolution range: d_max={args.min_res}, d_min={args.max_res}")
+                            logger.info(f"  d-spacing range in data: {np.min(d_spacings):.2f}A - {np.max(d_spacings):.2f}A")
+                        
+                        if args.min_res: 
+                            min_res_mask = (d_spacings <= args.min_res)
+                            num_rejected_by_min_res = np.sum(~min_res_mask)
+                            if args.verbose:
+                                logger.info(f"  Rejected by min_res: {num_rejected_by_min_res} ({num_rejected_by_min_res/len(d_spacings)*100:.1f}%)")
+                            accepted_idx &= min_res_mask
+                            
+                        if args.max_res: 
+                            max_res_mask = (d_spacings >= args.max_res)
+                            num_rejected_by_max_res = np.sum(~max_res_mask)
+                            if args.verbose:
+                                logger.info(f"  Rejected by max_res: {num_rejected_by_max_res} ({num_rejected_by_max_res/len(d_spacings)*100:.1f}%)")
+                            accepted_idx &= max_res_mask
+                        
+                        num_rejected_by_res_filter = np.sum(~accepted_idx)
+                    
+                    num_after_res_filter = np.sum(accepted_idx)
+                    if args.verbose:
+                        logger.info(f"  Candidates before res filter: {num_before_res_filter}")
+                        logger.info(f"  Rejected by res filter: {num_rejected_by_res_filter}")
+                        logger.info(f"  Accepted after res filter: {num_after_res_filter}")
                     
                     all_q_data.extend(q_batch[accepted_idx]); all_i_data.extend(np.array(p_i)[accepted_idx]); all_var_data.extend(np.array(p_v)[accepted_idx])
+                    
+                    if args.verbose and num_after_res_filter > 0:
+                        logger.info(f"  Added {num_after_res_filter} points from panel {panel_idx}. Total collected so far: {len(all_q_data)}")
         
         all_q_data=np.array(all_q_data); all_i_data=np.array(all_i_data); all_var_data=np.array(all_var_data)
         if args.lp_correction_enabled and len(all_q_data)>0: all_i_data,all_var_data = apply_lp_correction(all_i_data,all_var_data,all_q_data,beam.get_s0(),args.verbose)
         print(f"Collected {len(all_q_data)} data points from pixels.")
-        if args.verbose and len(all_q_data) > 0: print("First few (q,I,var):"); [print(f"  {all_q_data[i].tolist()}, {all_i_data[i]:.2f}, {all_var_data[i]:.2f}") for i in range(min(5,len(all_q_data)))]
+        
+        # Print detector trusted range for debugging
+        if args.verbose:
+            for i, panel in enumerate(detector):
+                trusted_range = panel.get_trusted_range()
+                logger.info(f"Panel {i} trusted range: {trusted_range}")
+                
+        # Print summary of filter rejections
+        if args.verbose and len(all_q_data) == 0:
+            logger.info("\nDEBUGGING SUMMARY: No pixels passed all filters!")
+            logger.info("Possible issues to check:")
+            logger.info("1. Bragg mask might be too aggressive - check with dials.image_viewer")
+            logger.info("2. Detector trusted range might be too restrictive")
+            logger.info("3. Intensity filters might be inappropriate for your data")
+            logger.info("4. Resolution filters might be too narrow")
+            logger.info("Try running with --min_intensity=None --max_intensity=None to disable intensity filtering")
+            
+        if args.verbose and len(all_q_data) > 0: 
+            print("First few (q,I,var):"); 
+            [print(f"  {all_q_data[i].tolist()}, {all_i_data[i]:.2f}, {all_var_data[i]:.2f}") for i in range(min(5,len(all_q_data)))]
     
     elif args.data_source == "bragg":
         print("WARNING: Bragg data utility mode. Output NOT for eryx diffuse intensity fitting.")

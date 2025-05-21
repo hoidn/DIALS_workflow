@@ -80,6 +80,10 @@ def parse_args():
     # Extraction script parameters (can add all from extract_dials_data_for_eryx.py here)
     parser.add_argument("--extract_gain", type=float, default=EXTRACT_DEFAULTS["gain"], help="Gain for extraction script.")
     parser.add_argument("--extract_orient_tol_deg", type=float, default=EXTRACT_DEFAULTS["orient_tolerance_deg"], help="Orientation tolerance for extraction script.")
+    parser.add_argument("--extract_min_intensity", type=float, help="Minimum intensity threshold for pixel data.")
+    parser.add_argument("--extract_max_intensity", type=float, help="Maximum intensity threshold for pixel data.")
+    parser.add_argument("--extract_min_res", type=float, help="Minimum resolution in Angstroms (d_max).")
+    parser.add_argument("--extract_max_res", type=float, help="Maximum resolution in Angstroms (d_min).")
     # ... add more extraction script args as needed ...
 
     parser.add_argument("--skip_post_processing", action="store_true", help="Skip post-DIALS Python script steps (extraction, diagnostics).")
@@ -263,10 +267,26 @@ def main():
                 f"--orient_tolerance_deg={args.extract_orient_tol_deg}",
                 f"--pixel_step={EXTRACT_DEFAULTS['pixel_step']}"
             ]
-            if EXTRACT_DEFAULTS["min_res"]: extract_cmd.append(f"--min_res={EXTRACT_DEFAULTS['min_res']}")
-            if EXTRACT_DEFAULTS["max_res"]: extract_cmd.append(f"--max_res={EXTRACT_DEFAULTS['max_res']}")
-            if EXTRACT_DEFAULTS["min_intensity"]: extract_cmd.append(f"--min_intensity={EXTRACT_DEFAULTS['min_intensity']}")
-            if EXTRACT_DEFAULTS["max_intensity"]: extract_cmd.append(f"--max_intensity={EXTRACT_DEFAULTS['max_intensity']}")
+            # Use command line args if provided, otherwise use defaults
+            if args.extract_min_res:
+                extract_cmd.append(f"--min_res={args.extract_min_res}")
+            elif EXTRACT_DEFAULTS["min_res"]:
+                extract_cmd.append(f"--min_res={EXTRACT_DEFAULTS['min_res']}")
+                
+            if args.extract_max_res:
+                extract_cmd.append(f"--max_res={args.extract_max_res}")
+            elif EXTRACT_DEFAULTS["max_res"]:
+                extract_cmd.append(f"--max_res={EXTRACT_DEFAULTS['max_res']}")
+                
+            if args.extract_min_intensity is not None:
+                extract_cmd.append(f"--min_intensity={args.extract_min_intensity}")
+            elif EXTRACT_DEFAULTS["min_intensity"]:
+                extract_cmd.append(f"--min_intensity={EXTRACT_DEFAULTS['min_intensity']}")
+                
+            if args.extract_max_intensity is not None:
+                extract_cmd.append(f"--max_intensity={args.extract_max_intensity}")
+            elif EXTRACT_DEFAULTS["max_intensity"]:
+                extract_cmd.append(f"--max_intensity={EXTRACT_DEFAULTS['max_intensity']}")
             if EXTRACT_DEFAULTS["lp_correction_enabled"]: extract_cmd.append("--lp_correction_enabled")
             if EXTRACT_DEFAULTS["subtract_background_value"] is not None: extract_cmd.append(f"--subtract_background_value={EXTRACT_DEFAULTS['subtract_background_value']}")
             if EXTRACT_DEFAULTS["plot"]: extract_cmd.append("--plot")
